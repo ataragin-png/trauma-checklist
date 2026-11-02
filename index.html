@@ -109,7 +109,23 @@ h3{font-size:13px;letter-spacing:.04em;color:var(--muted);margin:0;font-weight:6
 .toorder{font-weight:700;color:var(--muted)} .toorder.pos{color:var(--warn)}
 .formrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .formrow select,.formrow input{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0;flex:1 1 200px}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:20;font-weight:600;max-width:calc(100% - 32px)}
+.scanbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.btn.scan{display:inline-flex;align-items:center;gap:8px}
+.btn.scan svg{width:20px;height:20px}
+.scanov{position:fixed;inset:0;z-index:30;background:#0b1114;color:#eef2f3;display:flex;flex-direction:column;padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));gap:12px}
+.scanov h2{color:#eef2f3}
+.scanov .top{position:static;background:none;border:0;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.scanov .close{background:#22303a;color:#eef2f3;border:0;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer}
+#reader{width:100%;max-width:520px;margin:0 auto;border-radius:12px;overflow:hidden;background:#000;min-height:220px}
+#reader video{width:100%!important;height:auto!important;display:block}
+.scanmsg{max-width:520px;margin:0 auto;width:100%;border-radius:10px;padding:12px 14px;font-weight:700;background:#22303a;min-height:48px}
+.scanmsg.ok{background:#1d7446;color:#fff} .scanmsg.bad{background:#bd2329;color:#fff} .scanmsg.warn{background:#9a5c00;color:#fff}
+.scanman{max-width:520px;margin:0 auto;width:100%;display:flex;gap:8px}
+.scanman input{flex:1;min-width:0;background:#182126;color:#eef2f3;border:1px solid #2a363d;border-radius:8px;padding:9px 10px;direction:ltr;text-align:right}
+.scancount{max-width:520px;margin:0 auto;width:100%;color:#93a3ac;font-size:14px}
+.chkrow{display:flex;gap:16px;flex-wrap:wrap;font-size:14px}
+.chkrow label{display:flex;align-items:center;gap:6px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:40;font-weight:600;max-width:calc(100% - 32px)}
 .toast.err{background:var(--crit);color:#fff}
 @media (prefers-reduced-motion:no-preference){.row,.opts button{transition:background-color .15s,border-color .15s}}
 </style>
@@ -128,6 +144,13 @@ h3{font-size:13px;letter-spacing:.04em;color:var(--muted);margin:0;font-weight:6
 </div></main>
 <div class="submitbar" id="submitbar" hidden><div class="wrap"><span class="progress" id="progress"></span><button class="btn" id="submit">שמירת בדיקה</button></div></div>
 <div class="toast" id="toast" hidden></div>
+<div class="scanov" id="scanov" hidden role="dialog" aria-modal="true" aria-labelledby="scantitle">
+  <div class="top"><h2 id="scantitle">סריקת ברקוד</h2><button class="close" id="scanclose">סגירה</button></div>
+  <div id="reader"></div>
+  <div class="scanmsg" id="scanmsg" aria-live="polite">מכוונים את המצלמה לברקוד שעל המדבקה.</div>
+  <div class="scancount" id="scancount"></div>
+  <div class="scanman"><input id="scanmanual" inputmode="text" autocomplete="off" placeholder="או הקלדת מספר הזיהוי"><button class="close" id="scanmanbtn">אישור</button></div>
+</div>
 
 <script>
 const FREQ={devices:{label:'מכשור רפואי – יומי',days:1,daily:true},daily:{label:'ציוד – יומי',days:1,daily:true},order:{label:'הזמנה שבועית',days:7},weekly:{label:'ציוד – שבועי',days:7},monthly:{label:'ציוד – חודשי',days:31}};
@@ -142,7 +165,7 @@ let view=['nurses','volunteers','manager'].includes(store.get('view'))?store.get
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
-const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:''};
+const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',nd:{id:'',type:'',loc:'',vol:true,clean:false}};
 let busy=false,pending=false;
 
 const $=s=>document.querySelector(s);
@@ -150,7 +173,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const dayKey=d=>new Date(d).toLocaleDateString('en-CA',{timeZone:TZ});
 const fmt=iso=>new Date(iso).toLocaleString('he-IL',{timeZone:TZ,weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 const API_URL=(window.TRAUMA_CONFIG&&window.TRAUMA_CONFIG.apiUrl)||'';
-const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,submitDeviceCheck:null,submitOrder:null,resolveIssue:['mgrPin','id'],sendToRepair:['mgrPin','deviceId','reason'],returnFromRepair:['mgrPin','deviceId','note']};
+const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,submitDeviceCheck:null,submitOrder:null,resolveIssue:['mgrPin','id'],addDevice:['mgrPin','device'],sendToRepair:['mgrPin','deviceId','reason'],returnFromRepair:['mgrPin','deviceId','note']};
 async function api(fn,...args){
   if(!API_URL)throw new Error('האתר עדיין לא מחובר לגיליון הנתונים.');
   const body=ARGS[fn]?Object.fromEntries(ARGS[fn].map((k,i)=>[k,args[i]])):Object.assign({},args[0]);
@@ -250,7 +273,8 @@ function devicesBody(key,d){
   const types=[],by={};
   volDevices().forEach(x=>{if(!by[x.type]){by[x.type]=[];types.push(x.type)}by[x.type].push(x)});
   const loc=x=>x.location?` <span class="muted">· ${esc(x.location)}</span>`:'';
-  return types.map(t=>{
+  const act=volDevices().filter(x=>x.status==='active'),nf=act.filter(x=>d[x.id]==='found').length;
+  return`<section class="panel scanbar"><span class="statusline">סורקים כל מכשיר, והוא מסומן "נמצא" לבד. <b>${nf}/${act.length}</b></span><button class="btn scan" data-act="scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקת ברקוד</button></section>`+types.map(t=>{
     const list=by[t],req=S.devTypes[t],act=list.filter(x=>x.status==='active');
     const found=act.filter(x=>d[x.id]==='found').length,rep=list.length-act.length,done=act.every(x=>d[x.id]);
     const short=req!=null&&done&&found<req;
@@ -304,6 +328,13 @@ function managerView(){
   const sendForm=activeDevs.length?`<div class="formrow"><select id="rdev" aria-label="מכשיר לשליחה לתיקון"><option value="">בחירת מכשיר…</option>${activeDevs.map(x=>`<option value="${esc(x.id)}"${st.rdev===x.id?' selected':''}>${esc(x.type)} · ${esc(x.id)}</option>`).join('')}</select>
       <input id="rreason" placeholder="תקלה / סיבה (לא חובה)" value="${esc(st.rreason)}"><button class="btn" data-act="send">שליחה לתיקון</button></div>`:
     '<p class="empty">כדי לשלוח מכשיר לתיקון, קודם מוסיפים מכשירים בלשונית "מכשור רפואי" בגיליון.</p>';
+  const types=[...new Set(S.devices.map(x=>x.type))].sort((a,b)=>a.localeCompare(b,'he'));
+  const nd=st.nd;
+  const addForm=`<div class="formrow"><input id="nd-id" placeholder="מספר זיהוי" value="${esc(nd.id)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scanadd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
+    <div class="formrow"><input id="nd-type" list="nd-types" placeholder="סוג מכשיר (למשל: מוניטור)" value="${esc(nd.type)}"><datalist id="nd-types">${types.map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist>
+      <input id="nd-loc" placeholder="מיקום (לא חובה)" value="${esc(nd.loc)}"></div>
+    <div class="chkrow"><label><input type="checkbox" id="nd-vol"${nd.vol?' checked':''}> בצ׳קליסט בנות שירות</label><label><input type="checkbox" id="nd-clean"${nd.clean?' checked':''}> בצ׳קליסט מנקים</label></div>
+    <div><button class="btn" data-act="adddev">הוספת מכשיר</button></div>`;
   const lo=S.lastOrder,loLines=lo?lo.lines.filter(l=>l.order>0):[];
   const orderPanel=lo?`<p class="statusline">מולאה <b>${fmt(lo.at)}</b> ע"י ${esc(lo.by)} · ${loLines.length} פריטים להזמנה</p>
     ${loLines.length?`<div class="list">${loLines.map(l=>`<div class="li"><div class="main"><span><b>${esc(l.name)}</b></span><span class="muted">${esc(l.category)} · תקן ${l.qty==null?'—':l.qty} · במלאי ${l.stock==null?'—':l.stock}</span></div><span><b>${l.order}</b> ${esc(l.unit)}</span></div>`).join('')}</div>`:'<p class="empty">אין צורך להזמין. כל הפריטים במלאי מלא.</p>'}`:
@@ -314,6 +345,7 @@ function managerView(){
   <section class="panel"><h2>סטטוס בדיקות</h2>${stats}</section>
   <section class="panel"><h2>להשלמה ולתיקון</h2>${issueList}</section>
   <section class="panel"><h2>מכשור רפואי בתיקון</h2>${repList}<h3>שליחת מכשיר לתיקון</h3>${sendForm}</section>
+  <section class="panel"><h2>הוספת מכשיר</h2><p class="statusline">סורקים את הברקוד או מקלידים את המספר, ובוחרים סוג. המכשיר נכנס ללשונית "מכשור רפואי". ${S.devices.length} מכשירים ברשימה.</p>${addForm}</section>
   <section class="panel"><h2>הזמנה שבועית אחרונה</h2>${orderPanel}</section>
   <section class="panel"><h2>בדיקות אחרונות</h2>${recentList}</section>
   <section class="panel"><h2>עריכת הרשימות</h2>
@@ -331,6 +363,7 @@ document.getElementById('main').addEventListener('input',e=>{
   else if(t.id==='mpin')st.mgrDraft=t.value;
   else if(t.id==='rdev')st.rdev=t.value;
   else if(t.id==='rreason')st.rreason=t.value;
+  else if(t.id&&t.id.startsWith('nd-')){const k=t.id.slice(3);st.nd[k]=t.type==='checkbox'?t.checked:t.value}
   else if(t.classList.contains('cnt'))cnt[view+'|'+selFreq[view]+'|'+t.dataset.id]=t.value;
   else if(t.classList.contains('stock')){
     const key=view+'|'+selFreq[view];cnt[key+'|'+t.dataset.id]=t.value;
@@ -366,6 +399,12 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='reload'){b.disabled=true;await refresh();b.disabled=false;toast('עודכן');return}
   if(act==='login'){login();return}
   if(act==='logout'){mgrPin='';store.set('mgrPin','');S.isMgr=false;S.openIssues=[];render();return}
+  if(act==='scan'){openScanner('check');return}
+  if(act==='scanadd'){openScanner('add');return}
+  if(act==='adddev'){
+    const nd=st.nd;if(!nd.id.trim()){toast('יש להזין או לסרוק מספר זיהוי','err');return}if(!nd.type.trim()){toast('יש לבחור סוג מכשיר','err');return}
+    b.disabled=true;try{apply(await api('addDevice',mgrPin,{id:nd.id,type:nd.type,location:nd.loc,vol:nd.vol,clean:nd.clean}));
+      toast(`${nd.type} ${nd.id} נוסף`);st.nd={id:'',type:nd.type,loc:nd.loc,vol:nd.vol,clean:nd.clean};render()}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='send'){
     const id=st.rdev||($('#rdev')&&$('#rdev').value);if(!id){toast('יש לבחור מכשיר','err');return}
     b.disabled=true;try{apply(await api('sendToRepair',mgrPin,id,st.rreason));st.rdev='';st.rreason='';render();toast('המכשיר סומן כבתיקון')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
@@ -418,7 +457,70 @@ document.getElementById('submit').addEventListener('click',async()=>{
   }
 });
 
-setInterval(()=>{if(document.visibilityState==='visible'&&!busy)refresh()},90000);
+/* ---------- barcode scanner ---------- */
+const normId=v=>String(v||'').replace(/[^0-9A-Za-z\u0590-\u05FF]/g,'').toUpperCase();
+let scanner=null,scanMode=null,lastCode='',lastAt=0,libP=null;
+function loadLib(){
+  if(window.Html5Qrcode)return Promise.resolve();
+  if(!libP)libP=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='vendor/html5-qrcode.min.js';sc.onload=res;sc.onerror=()=>{libP=null;rej(new Error('טעינת הסורק נכשלה. בדוק/י אינטרנט.'))};document.head.appendChild(sc)});
+  return libP;
+}
+function scanMsg(text,kind){const m=$('#scanmsg');m.textContent=text;m.className='scanmsg'+(kind?' '+kind:'')}
+function scanCount(){
+  if(scanMode!=='check'){$('#scancount').textContent='';return}
+  const d=draft['volunteers|devices']||{},act=volDevices().filter(x=>x.status==='active');
+  $('#scancount').textContent=`נסרקו ${act.filter(x=>d[x.id]==='found').length} מתוך ${act.length} מכשירים`;
+}
+async function openScanner(mode){
+  scanMode=mode;lastCode='';
+  $('#scanov').hidden=false;$('#scanmanual').value='';
+  $('#scantitle').textContent=mode==='add'?'סריקת מכשיר חדש':'סריקת מכשירים';
+  scanMsg('מכוונים את המצלמה לברקוד שעל המדבקה.');scanCount();
+  try{
+    await loadLib();
+    const F=Html5QrcodeSupportedFormats;
+    scanner=new Html5Qrcode('reader',{verbose:false,formatsToSupport:[F.CODE_128,F.CODE_39,F.CODE_93,F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true}});
+    await scanner.start({facingMode:'environment'},{fps:10,qrbox:(w,h)=>({width:Math.floor(Math.min(w*.9,360)),height:Math.floor(Math.min(h*.45,180))})},onCode,()=>{});
+  }catch(e){
+    const m=String((e&&e.message)||e||'');
+    scanMsg(/Permission|NotAllowed/i.test(m)?'אין הרשאה למצלמה. מאשרים גישה למצלמה בהגדרות הדפדפן, או מקלידים את המספר למטה.':(m.includes('טעינת')?m:'לא הצלחתי לפתוח את המצלמה. אפשר להקליד את המספר למטה.'),'bad');
+  }
+}
+async function closeScanner(){
+  const s=scanner;scanner=null;
+  if(s){try{await s.stop()}catch(e){}try{s.clear()}catch(e){}}
+  $('#scanov').hidden=true;$('#reader').innerHTML='';
+  if(scanMode==='check'){const y=window.scrollY;render();window.scrollTo(0,y)}
+  scanMode=null;
+}
+function onCode(text){
+  const code=normId(text),now=Date.now();
+  if(!code||(code===lastCode&&now-lastAt<2500))return;
+  lastCode=code;lastAt=now;
+  try{navigator.vibrate&&navigator.vibrate(60)}catch(e){}
+  handleCode(code,text.trim());
+}
+function handleCode(code,raw){
+  const dev=S.devices.find(x=>normId(x.id)===code);
+  if(scanMode==='add'){
+    if(dev){scanMsg(`המכשיר כבר קיים: ${dev.type} ${dev.id}${dev.status==='repair'?' (בתיקון)':''}`,'warn');st.rdev=dev.status==='active'?dev.id:st.rdev;return}
+    st.nd.id=raw.replace(/\s+/g,'');closeScanner().then(()=>{render();toast('נסרק: '+st.nd.id+'. בוחרים סוג ומוסיפים.');const el=$('#nd-type');if(el)el.focus()});
+    return;
+  }
+  if(!dev){scanMsg('ברקוד לא מוכר: '+raw+'. המכשיר לא נמצא ברשימה.','bad');return}
+  if(!dev.vol){scanMsg(`${dev.type} ${dev.id} לא נמצא בצ׳קליסט של בנות השירות.`,'warn');return}
+  if(dev.status==='repair'){scanMsg(`${dev.type} ${dev.id} מסומן כבתיקון.`,'warn');return}
+  const key='volunteers|devices';draft[key]=draft[key]||{};
+  const already=draft[key][dev.id]==='found';draft[key][dev.id]='found';
+  scanMsg(`✓ ${dev.type} ${dev.id}${dev.location?' · '+dev.location:''}${already?' (כבר סומן)':' נמצא'}`,'ok');
+  scanCount();updateProgress();
+}
+$('#scanclose').addEventListener('click',closeScanner);
+$('#scanmanbtn').addEventListener('click',()=>{const v=$('#scanmanual').value;if(!v.trim())return;lastCode='';handleCode(normId(v),v.trim());$('#scanmanual').value=''});
+$('#scanmanual').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#scanmanbtn').click()}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#scanov').hidden)closeScanner()});
+
+setInterval(()=>{if(document.visibilityState==='visible'&&!busy&&$('#scanov').hidden)refresh()},90000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&S.loaded)refresh()});
 render();refresh();
 </script>

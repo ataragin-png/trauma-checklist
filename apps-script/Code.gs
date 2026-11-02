@@ -101,6 +101,7 @@ function handle_(p) {
       case 'submitOrder': data = submitOrder(p); break;
       case 'sendToRepair': data = sendToRepair(p.mgrPin, p.deviceId, p.reason); break;
       case 'returnFromRepair': data = returnFromRepair(p.mgrPin, p.deviceId, p.note); break;
+      case 'addDevice': data = addDevice(p.mgrPin, p.device); break;
       default: throw new Error('פעולה לא מוכרת.');
     }
     return json_({ ok: true, data: data });
@@ -485,6 +486,30 @@ function sendToRepair(mgrPin, deviceId, reason) {
     if (d.status === 'repair') throw new Error('המכשיר כבר מסומן בתיקון.');
     ss_().getSheetByName(SH.devices).getRange(d.row, 6).setValue(DEV_REPAIR);
     ss_().getSheetByName(SH.repairs).appendRow([d.id, d.type, new Date(), String(reason || '').trim().slice(0, 300), '', '', DEV_REPAIR]);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return getState(mgrPin);
+}
+
+const normId_ = v => String(v || '').replace(/[^0-9A-Za-z\u0590-\u05FF]/g, '').toUpperCase();
+
+function addDevice(mgrPin, dev) {
+  mgrAuth_(mgrPin);
+  dev = dev || {};
+  const id = String(dev.id || '').trim().replace(/\s+/g, '').slice(0, 60);
+  const type = String(dev.type || '').trim().slice(0, 80);
+  if (!id) throw new Error('חסר מספר זיהוי.');
+  if (!type) throw new Error('חסר סוג מכשיר.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const ex = readDevices_().filter(d => normId_(d.id) === normId_(id))[0];
+    if (ex) throw new Error('המכשיר ' + ex.id + ' כבר קיים ברשימה (' + ex.type + ').');
+    const sh = ss_().getSheetByName(SH.devices);
+    sh.getRange(sh.getLastRow() + 1, 1, 1, DEVICE_HEADERS.length).setValues([[id, type, String(dev.location || '').trim().slice(0, 80),
+      dev.vol === true, dev.clean === true, DEV_ACTIVE, '']]);
     SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();
