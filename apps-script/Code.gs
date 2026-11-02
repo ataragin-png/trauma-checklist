@@ -215,7 +215,12 @@ function getState(mgrPin) {
   if (isMgr) {
     res.openIssues = readIssues_().filter(x => x.status === 'open').sort((a, b) => (a.at < b.at ? 1 : -1));
     res.recent = checks.slice().sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 15);
-    res.repairs = readRepairs_().filter(r => r.open).map(r => ({ id: r.id, type: r.type, sentAt: r.sentAt, reason: r.reason }));
+    const allRep = readRepairs_();
+    res.repairs = allRep.filter(r => r.open).map(r => ({ id: r.id, type: r.type, sentAt: r.sentAt, reason: r.reason }));
+    res.repairHistory = {};
+    allRep.forEach(r => {
+      (res.repairHistory[r.id] = res.repairHistory[r.id] || []).push({ sentAt: r.sentAt, reason: r.reason, returnedAt: r.returnedAt, returnNote: r.returnNote, open: r.open });
+    });
     res.lastOrder = lastOrder_();
     res.sheetUrl = ss_().getUrl();
   }
@@ -359,7 +364,7 @@ function readRepairs_() {
   return readRows_(SH.repairs, 3000).map(o => {
     const r = o.r;
     return { row: o.row, id: String(r[0]).trim(), type: String(r[1]), sentAt: iso_(r[2]), reason: String(r[3] || ''),
-      open: String(r[6]).trim() === DEV_REPAIR };
+      returnedAt: iso_(r[4]), returnNote: String(r[5] || ''), open: String(r[6]).trim() === DEV_REPAIR };
   }).filter(r => r.id && r.sentAt);
 }
 
@@ -484,8 +489,9 @@ function sendToRepair(mgrPin, deviceId, reason) {
     const d = readDevices_().filter(x => x.id === deviceId)[0];
     if (!d) throw new Error('המכשיר לא נמצא ברשימה.');
     if (d.status === 'repair') throw new Error('המכשיר כבר מסומן בתיקון.');
+    if (!String(reason || '').trim()) throw new Error('יש לכתוב מה התקלה.');
     ss_().getSheetByName(SH.devices).getRange(d.row, 6).setValue(DEV_REPAIR);
-    ss_().getSheetByName(SH.repairs).appendRow([d.id, d.type, new Date(), String(reason || '').trim().slice(0, 300), '', '', DEV_REPAIR]);
+    ss_().getSheetByName(SH.repairs).appendRow([d.id, d.type, new Date(), String(reason || '').trim().slice(0, 1000), '', '', DEV_REPAIR]);
     SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();

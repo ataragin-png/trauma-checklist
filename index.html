@@ -125,6 +125,20 @@ h3{font-size:13px;letter-spacing:.04em;color:var(--muted);margin:0;font-weight:6
 .scancount{max-width:520px;margin:0 auto;width:100%;color:#93a3ac;font-size:14px}
 .chkrow{display:flex;gap:16px;flex-wrap:wrap;font-size:14px}
 .chkrow label{display:flex;align-items:center;gap:6px}
+.formcol{display:flex;flex-direction:column;gap:8px}
+.formcol select,.formcol textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
+.formcol textarea{min-height:72px;resize:vertical}
+.hint{font-size:13px;color:var(--warn);font-weight:600;margin:0}
+.retrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:1 1 100%}
+.retrow input{flex:1 1 180px;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+details.dev{border-top:1px solid var(--line);padding:10px 0}
+details.dev:first-child{border-top:0}
+details.dev summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center;list-style:none}
+details.dev summary::-webkit-details-marker{display:none}
+.tl{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-inline-start:12px;border-inline-start:2px solid var(--line)}
+.tl .ev{display:flex;flex-direction:column;gap:2px}
+.cntbadge{min-width:28px;text-align:center;font-family:var(--f-mono);font-weight:700;border-radius:999px;padding:2px 8px;background:var(--warn-bg);color:var(--warn)}
+.devcard{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:40;font-weight:600;max-width:calc(100% - 32px)}
 .toast.err{background:var(--crit);color:#fff}
 @media (prefers-reduced-motion:no-preference){.row,.opts button{transition:background-color .15s,border-color .15s}}
@@ -160,12 +174,12 @@ const TYPE={missing:'חסר',broken:'תקול'};
 const TZ='Asia/Jerusalem';
 const store={get(k){try{return localStorage.getItem(k)||''}catch(e){return''}},set(k,v){try{v?localStorage.setItem(k,v):localStorage.removeItem(k)}catch(e){}}};
 
-const S={loaded:false,error:'',items:[],last:{},openIssues:[],recent:[],isMgr:false,sheetUrl:'',unit:'',devices:[],devTypes:{},consumables:[],repairs:[],lastOrder:null};
+const S={loaded:false,error:'',items:[],last:{},openIssues:[],recent:[],isMgr:false,sheetUrl:'',unit:'',devices:[],devTypes:{},consumables:[],repairs:[],lastOrder:null,repairHistory:{}};
 let view=['nurses','volunteers','manager'].includes(store.get('view'))?store.get('view'):'nurses';
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
-const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',nd:{id:'',type:'',loc:'',vol:true,clean:false}};
+const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:true,clean:false}};
 let busy=false,pending=false;
 
 const $=s=>document.querySelector(s);
@@ -212,7 +226,7 @@ function toast(msg,kind){const t=$('#toast');t.textContent=msg;t.className='toas
 function apply(s){
   S.loaded=true;S.error='';S.items=s.items||[];S.last=s.last||{};S.unit=s.unit||'';S.isMgr=!!s.isMgr;
   S.openIssues=s.openIssues||[];S.recent=s.recent||[];S.sheetUrl=s.sheetUrl||'';
-  S.devices=s.devices||[];S.devTypes=s.devTypes||{};S.consumables=s.consumables||[];S.repairs=s.repairs||[];S.lastOrder=s.lastOrder||null;
+  S.devices=s.devices||[];S.devTypes=s.devTypes||{};S.consumables=s.consumables||[];S.repairs=s.repairs||[];S.lastOrder=s.lastOrder||null;S.repairHistory=s.repairHistory||{};
   if(mgrPin&&!S.isMgr){mgrPin='';store.set('mgrPin','')}
   scheduleRender();
 }
@@ -322,12 +336,26 @@ function managerView(){
       <button class="btn small" data-act="resolve" data-id="${esc(x.id)}">הושלם</button></div>`).join('')}</div>`:'<p class="empty">אין חוסרים או תקלות פתוחים.</p>';
   const days=iso=>Math.max(0,Math.floor((Date.now()-new Date(iso))/864e5));
   const repList=S.repairs.length?`<div class="list">${S.repairs.map(r=>`<div class="li"><div class="main"><span><b>${esc(r.type)}</b> <span class="devid">${esc(r.id)}</span></span>
-      ${r.reason?`<span class="muted">${esc(r.reason)}</span>`:''}<span class="mono">נשלח ${fmt(r.sentAt)} · ${days(r.sentAt)} ימים בתיקון</span></div>
-      <button class="btn small" data-act="ret" data-id="${esc(r.id)}">חזר מתיקון</button></div>`).join('')}</div>`:'<p class="empty">אין כרגע מכשירים בתיקון.</p>';
+      ${r.reason?`<span>${esc(r.reason)}</span>`:''}<span class="mono">נשלח ${fmt(r.sentAt)} · ${days(r.sentAt)} ימים בתיקון · תקלה מס׳ ${(S.repairHistory[r.id]||[]).length||1}</span></div>
+      <div class="retrow"><input id="rn-${esc(r.id)}" data-rn="${esc(r.id)}" placeholder="מה תוקן? (לא חובה)" value="${esc(st.rnote[r.id]||'')}"><button class="btn small" data-act="ret" data-id="${esc(r.id)}">חזר מתיקון</button></div></div>`).join('')}</div>`:'<p class="empty">אין כרגע מכשירים בתיקון.</p>';
   const activeDevs=S.devices.filter(x=>x.status==='active').slice().sort((a,b)=>a.type.localeCompare(b.type,'he')||a.id.localeCompare(b.id));
-  const sendForm=activeDevs.length?`<div class="formrow"><select id="rdev" aria-label="מכשיר לשליחה לתיקון"><option value="">בחירת מכשיר…</option>${activeDevs.map(x=>`<option value="${esc(x.id)}"${st.rdev===x.id?' selected':''}>${esc(x.type)} · ${esc(x.id)}</option>`).join('')}</select>
-      <input id="rreason" placeholder="תקלה / סיבה (לא חובה)" value="${esc(st.rreason)}"><button class="btn" data-act="send">שליחה לתיקון</button></div>`:
+  const prevN=st.rdev?(S.repairHistory[st.rdev]||[]).length:0;
+  const sendForm=activeDevs.length?`<div class="formcol"><div class="formrow"><select id="rdev" aria-label="מכשיר לשליחה לתיקון"><option value="">בחירת מכשיר…</option>${activeDevs.map(x=>`<option value="${esc(x.id)}"${st.rdev===x.id?' selected':''}>${esc(x.type)} · ${esc(x.id)}${(S.repairHistory[x.id]||[]).length?' ('+(S.repairHistory[x.id]||[]).length+' תקלות)':''}</option>`).join('')}</select>
+      <button class="btn ghost scan" data-act="scanrepair"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
+      ${prevN?`<p class="hint">המכשיר הזה כבר נשלח לתיקון ${prevN} פעמים בעבר.</p>`:''}
+      <label for="rreason" class="muted" style="font-size:13px;font-weight:600">תיאור התקלה</label>
+      <textarea id="rreason" placeholder="למשל: המסך לא נדלק, נופל ל-Error 23 אחרי חצי דקה">${esc(st.rreason)}</textarea>
+      <div><button class="btn" data-act="send">שליחה לתיקון</button></div></div>`:
     '<p class="empty">כדי לשלוח מכשיר לתיקון, קודם מוסיפים מכשירים בלשונית "מכשור רפואי" בגיליון.</p>';
+  const hist=S.repairHistory,devById={};S.devices.forEach(x=>devById[x.id]=x);
+  const evList=id=>`<div class="tl">${(hist[id]||[]).slice().sort((a,b)=>a.sentAt<b.sentAt?1:-1).map(e=>`<div class="ev"><span><b>${esc(e.reason||'ללא תיאור')}</b></span>
+      <span class="mono">נשלח ${fmt(e.sentAt)}${e.returnedAt?' · חזר '+fmt(e.returnedAt)+' · '+Math.max(0,Math.round((new Date(e.returnedAt)-new Date(e.sentAt))/864e5))+' ימים':' · עדיין בתיקון'}</span>${e.returnNote?`<span class="muted">תוקן: ${esc(e.returnNote)}</span>`:''}</div>`).join('')}</div>`;
+  const ranked=Object.keys(hist).sort((a,b)=>hist[b].length-hist[a].length||a.localeCompare(b));
+  const q=normId(st.hq),found=q?S.devices.find(x=>normId(x.id)===q):null,qid=found?found.id:(q?Object.keys(hist).find(k=>normId(k)===q):null);
+  const lookup=st.hq?(qid?`<div class="devcard"><span><b>${esc(found?found.type:(hist[qid][0]&&''))}${found?'':''}</b> <span class="devid">${esc(qid)}</span>${found&&found.location?` <span class="muted">· ${esc(found.location)}</span>`:''}</span>
+      <span>${found&&found.status==='repair'?'<span class="pill repair">בתיקון</span> ':''}<b>${(hist[qid]||[]).length}</b> תקלות עד היום</span>${(hist[qid]||[]).length?evList(qid):''}</div>`:`<p class="empty">לא נמצא מכשיר עם המספר ${esc(st.hq)}.</p>`):'';
+  const histPanel=`<div class="formrow"><input id="hq" placeholder="חיפוש לפי מספר זיהוי" value="${esc(st.hq)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scanlookup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>${lookup}
+    <h3>לפי מספר תקלות</h3>${ranked.length?`<div>${ranked.map(id=>{const dv=devById[id],ty=dv?dv.type:((hist[id].find(e=>e)||{}).type||'');return`<details class="dev"><summary><span><b>${esc(dv?dv.type:'')}</b> <span class="devid">${esc(id)}</span>${dv&&dv.status==='repair'?' <span class="pill repair">בתיקון</span>':''}</span><span class="cntbadge">${hist[id].length}</span></summary>${evList(id)}</details>`}).join('')}</div>`:'<p class="empty">עוד לא נשלחו מכשירים לתיקון.</p>'}`;
   const types=[...new Set(S.devices.map(x=>x.type))].sort((a,b)=>a.localeCompare(b,'he'));
   const nd=st.nd;
   const addForm=`<div class="formrow"><input id="nd-id" placeholder="מספר זיהוי" value="${esc(nd.id)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scanadd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
@@ -345,6 +373,7 @@ function managerView(){
   <section class="panel"><h2>סטטוס בדיקות</h2>${stats}</section>
   <section class="panel"><h2>להשלמה ולתיקון</h2>${issueList}</section>
   <section class="panel"><h2>מכשור רפואי בתיקון</h2>${repList}<h3>שליחת מכשיר לתיקון</h3>${sendForm}</section>
+  <section class="panel" id="histsec"><h2>היסטוריית תקלות</h2>${histPanel}</section>
   <section class="panel"><h2>הוספת מכשיר</h2><p class="statusline">סורקים את הברקוד או מקלידים את המספר, ובוחרים סוג. המכשיר נכנס ללשונית "מכשור רפואי". ${S.devices.length} מכשירים ברשימה.</p>${addForm}</section>
   <section class="panel"><h2>הזמנה שבועית אחרונה</h2>${orderPanel}</section>
   <section class="panel"><h2>בדיקות אחרונות</h2>${recentList}</section>
@@ -361,8 +390,10 @@ document.getElementById('main').addEventListener('input',e=>{
   else if(t.id==='note')st.note=t.value;
   else if(t.id==='spin')st.pinDraft=t.value;
   else if(t.id==='mpin')st.mgrDraft=t.value;
-  else if(t.id==='rdev')st.rdev=t.value;
+  else if(t.id==='rdev'){st.rdev=t.value;const a=document.activeElement;if(a)a.blur();render()}
   else if(t.id==='rreason')st.rreason=t.value;
+  else if(t.id==='hq'){st.hq=t.value;clearTimeout(window.__hqT);window.__hqT=setTimeout(()=>{const pos=t.selectionStart;render();const el=$('#hq');if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}},400)}
+  else if(t.dataset&&t.dataset.rn)st.rnote[t.dataset.rn]=t.value;
   else if(t.id&&t.id.startsWith('nd-')){const k=t.id.slice(3);st.nd[k]=t.type==='checkbox'?t.checked:t.value}
   else if(t.classList.contains('cnt'))cnt[view+'|'+selFreq[view]+'|'+t.dataset.id]=t.value;
   else if(t.classList.contains('stock')){
@@ -401,14 +432,17 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='logout'){mgrPin='';store.set('mgrPin','');S.isMgr=false;S.openIssues=[];render();return}
   if(act==='scan'){openScanner('check');return}
   if(act==='scanadd'){openScanner('add');return}
+  if(act==='scanlookup'){openScanner('lookup');return}
+  if(act==='scanrepair'){openScanner('repair');return}
   if(act==='adddev'){
     const nd=st.nd;if(!nd.id.trim()){toast('יש להזין או לסרוק מספר זיהוי','err');return}if(!nd.type.trim()){toast('יש לבחור סוג מכשיר','err');return}
     b.disabled=true;try{apply(await api('addDevice',mgrPin,{id:nd.id,type:nd.type,location:nd.loc,vol:nd.vol,clean:nd.clean}));
       toast(`${nd.type} ${nd.id} נוסף`);st.nd={id:'',type:nd.type,loc:nd.loc,vol:nd.vol,clean:nd.clean};render()}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='send'){
     const id=st.rdev||($('#rdev')&&$('#rdev').value);if(!id){toast('יש לבחור מכשיר','err');return}
+    if(!st.rreason.trim()){toast('יש לכתוב מה התקלה','err');const el=$('#rreason');if(el)el.focus();return}
     b.disabled=true;try{apply(await api('sendToRepair',mgrPin,id,st.rreason));st.rdev='';st.rreason='';render();toast('המכשיר סומן כבתיקון')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
-  if(act==='ret'){b.disabled=true;try{apply(await api('returnFromRepair',mgrPin,b.dataset.id,''));toast('המכשיר חזר לפעילות')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
+  if(act==='ret'){b.disabled=true;try{apply(await api('returnFromRepair',mgrPin,b.dataset.id,st.rnote[b.dataset.id]||''));delete st.rnote[b.dataset.id];toast('המכשיר חזר לפעילות')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='resolve'){b.disabled=true;try{apply(await api('resolveIssue',mgrPin,b.dataset.id));toast('סומן כהושלם')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}}
 });
 
@@ -474,7 +508,7 @@ function scanCount(){
 async function openScanner(mode){
   scanMode=mode;lastCode='';
   $('#scanov').hidden=false;$('#scanmanual').value='';
-  $('#scantitle').textContent=mode==='add'?'סריקת מכשיר חדש':'סריקת מכשירים';
+  $('#scantitle').textContent={add:'סריקת מכשיר חדש',lookup:'חיפוש מכשיר',repair:'מכשיר לתיקון'}[mode]||'סריקת מכשירים';
   scanMsg('מכוונים את המצלמה לברקוד שעל המדבקה.');scanCount();
   try{
     await loadLib();
@@ -502,6 +536,11 @@ function onCode(text){
 }
 function handleCode(code,raw){
   const dev=S.devices.find(x=>normId(x.id)===code);
+  if(scanMode==='lookup'){st.hq=dev?dev.id:raw;closeScanner().then(()=>{render();const el=$('#histsec');if(el)el.scrollIntoView({block:'start'})});return}
+  if(scanMode==='repair'){
+    if(!dev){scanMsg('ברקוד לא מוכר: '+raw+'. המכשיר לא נמצא ברשימה.','bad');return}
+    if(dev.status==='repair'){scanMsg(`${dev.type} ${dev.id} כבר מסומן כבתיקון.`,'warn');return}
+    st.rdev=dev.id;closeScanner().then(()=>{render();const el=$('#rreason');if(el){el.scrollIntoView({block:'center'});el.focus()}});return}
   if(scanMode==='add'){
     if(dev){scanMsg(`המכשיר כבר קיים: ${dev.type} ${dev.id}${dev.status==='repair'?' (בתיקון)':''}`,'warn');st.rdev=dev.status==='active'?dev.id:st.rdev;return}
     st.nd.id=raw.replace(/\s+/g,'');closeScanner().then(()=>{render();toast('נסרק: '+st.nd.id+'. בוחרים סוג ומוסיפים.');const el=$('#nd-type');if(el)el.focus()});
