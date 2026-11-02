@@ -27,8 +27,8 @@ const CHECK_HEADERS = ['תאריך ושעה', 'צוות', 'תדירות', 'בו�
 const DEVICE_HEADERS = ['מספר זיהוי (הנדסה רפואית)', 'סוג מכשיר', 'מיקום', 'בצ׳קליסט בנות שירות', 'בצ׳קליסט מנקים', 'סטטוס', 'הערות'];
 const DEVTYPE_HEADERS = ['סוג מכשיר', 'כמות תקן'];
 const REPAIR_HEADERS = ['מספר זיהוי', 'סוג מכשיר', 'תאריך שליחה', 'תקלה / סיבה', 'תאריך חזרה', 'הערת חזרה', 'סטטוס'];
-const CONS_HEADERS = ['מזהה', 'פריט', 'קטגוריה', 'יחידת מידה', 'כמות תקן'];
-const ORDER_HEADERS = ['מזהה הזמנה', 'תאריך', 'בת שירות', 'פריט', 'קטגוריה', 'יחידה', 'תקן', 'מלאי קיים', 'להזמנה'];
+const CONS_HEADERS = ['מזהה', 'פריט', 'קטגוריה', 'יחידת מידה', 'כמות תקן', 'ברקוד / מק״ט'];
+const ORDER_HEADERS = ['מזהה הזמנה', 'תאריך', 'בת שירות', 'פריט', 'קטגוריה', 'יחידה', 'תקן', 'מלאי קיים', 'להזמנה', 'ברקוד / מק״ט'];
 const ISSUE_HEADERS = ['מזהה', 'תאריך דיווח', 'פריט', 'ארון / מיקום', 'סוג', 'כמות תקן', 'נמצאו בפועל', 'להשלים',
   'דווח ע"י', 'צוות', 'הערה', 'סטטוס', 'תאריך טיפול', 'מזהה פריט'];
 
@@ -325,11 +325,14 @@ function setupV2() {
     .requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(false).build());
   cons.getRange('A1').setNote('מזהה פנימי. נוצר אוטומטית, אין צורך למלא.');
   cons.getRange('A2:A').setFontColor('#8a969c');
-  cons.setColumnWidth(1, 80).setColumnWidth(2, 300).setColumnWidth(3, 160).setColumnWidth(4, 110).setColumnWidth(5, 90);
+  cons.setColumnWidth(1, 80).setColumnWidth(2, 300).setColumnWidth(3, 160).setColumnWidth(4, 110).setColumnWidth(5, 90).setColumnWidth(6, 170);
+  cons.getRange(2, 6, N, 1).setNumberFormat('@');
+  cons.getRange('F1').setNote('הברקוד או המק״ט כפי שהוא נסרק במערכת ההזמנות של בית החולים. נשמר כטקסט כדי לא לאבד אפסים בהתחלה.');
 
   const ord = sheet_(SH.orders, ORDER_HEADERS);
   ord.getRange('B2:B').setNumberFormat('dd/MM/yyyy HH:mm');
-  ord.setColumnWidth(2, 130).setColumnWidth(3, 130).setColumnWidth(4, 260);
+  ord.setColumnWidth(2, 130).setColumnWidth(3, 130).setColumnWidth(4, 260).setColumnWidth(10, 170);
+  ord.getRange(2, 10, N * 20, 1).setNumberFormat('@');
 }
 
 function readDevices_() {
@@ -356,7 +359,8 @@ function readConsumables_() {
     if (!name) return null;
     let id = String(r[0]).trim();
     if (!id) { id = 'c' + Utilities.getUuid().slice(0, 8); sh.getRange(o.row, 1).setValue(id); }
-    return { id: id, name: name, category: String(r[2] || '').trim() || 'כללי', unit: String(r[3] || '').trim(), qty: num_(r[4]) };
+    return { id: id, name: name, category: String(r[2] || '').trim() || 'כללי', unit: String(r[3] || '').trim(), qty: num_(r[4]),
+      barcode: r[5] === undefined || r[5] === null ? '' : String(r[5]).trim() };
   }).filter(Boolean);
 }
 
@@ -374,7 +378,8 @@ function lastOrder_() {
   const lastId = String(rows[rows.length - 1][0]);
   const mine = rows.filter(r => String(r[0]) === lastId);
   return { id: lastId, at: iso_(mine[0][1]), by: String(mine[0][2]),
-    lines: mine.map(r => ({ name: String(r[3]), category: String(r[4]), unit: String(r[5]), qty: num_(r[6]), stock: num_(r[7]), order: num_(r[8]) || 0 })) };
+    lines: mine.map(r => ({ name: String(r[3]), category: String(r[4]), unit: String(r[5]), qty: num_(r[6]), stock: num_(r[7]), order: num_(r[8]) || 0,
+      barcode: r[9] === undefined || r[9] === null ? '' : String(r[9]).trim() })) };
 }
 
 function staffAuth_(p) {
@@ -447,7 +452,7 @@ function submitOrder(p) {
       const ord = c.qty === null ? 0 : Math.max(0, c.qty - st);
       return { c: c, stock: st, order: ord };
     });
-    const rows = lines.map(l => [oid, now, by, l.c.name, l.c.category, l.c.unit, l.c.qty === null ? '' : l.c.qty, l.stock, l.order]);
+    const rows = lines.map(l => [oid, now, by, l.c.name, l.c.category, l.c.unit, l.c.qty === null ? '' : l.c.qty, l.stock, l.order, l.c.barcode]);
     const sh = ss_().getSheetByName(SH.orders);
     sh.getRange(sh.getLastRow() + 1, 1, rows.length, ORDER_HEADERS.length).setValues(rows);
     const toOrder = lines.filter(l => l.order > 0);
@@ -607,7 +612,7 @@ function sheet_(name, headers) {
   let sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
   sh.setRightToLeft(true);
-  if (sh.getLastRow() === 0) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
   sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#dcedef');
   sh.setFrozenRows(1);
   return sh;
