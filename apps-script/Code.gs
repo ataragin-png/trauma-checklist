@@ -10,15 +10,25 @@ const SHEET_ID = '1dg1sYid-MfXceeg4bV1Ay1WxlxmND8A3u6DZQisB8aI';
 const SITE_URL = 'https://ataragin-png.github.io/trauma-checklist/';
 
 const TZ = 'Asia/Jerusalem';
-const SH = { items: 'ציוד', checks: 'בדיקות', issues: 'חוסרים ותקלות', settings: 'הגדרות' };
+const SH = { items: 'ציוד', checks: 'בדיקות', issues: 'חוסרים ותקלות', settings: 'הגדרות',
+  devices: 'מכשור רפואי', devTypes: 'תקן מכשירים', repairs: 'תיקונים', consumables: 'מתכלים', orders: 'הזמנות' };
 const TEAM_HE = { nurses: 'אחיות', volunteers: 'בנות שירות' };
-const FREQ_HE = { daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית' };
-const FREQ_DAYS = { daily: 1, weekly: 7, monthly: 31 };
+const GEN_FREQ_HE = { daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית' };
+// Special volunteer checklists share the checks log; their key goes in the "תדירות" column.
+const FREQ_HE = { daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית', devices: 'מכשור רפואי – יומי', order: 'הזמנה שבועית' };
+const FREQ_DAYS = { daily: 1, weekly: 7, monthly: 31, devices: 1, order: 7 };
+const DAILY_KEYS = { daily: true, devices: true };
+const DEV_ACTIVE = 'פעיל', DEV_REPAIR = 'בתיקון';
 const TYPE_HE = { missing: 'חסר', broken: 'תקול' };
 const STATUS_OPEN = 'פתוח', STATUS_DONE = 'טופל';
 
 const ITEM_HEADERS = ['מזהה', 'פריט', 'ארון / מיקום', 'מי בודק', 'תדירות', 'קריטי', 'כמות תקן'];
 const CHECK_HEADERS = ['תאריך ושעה', 'צוות', 'תדירות', 'בודק/ת', 'מס׳ בעיות', 'מס׳ פריטים', 'הערות', 'פריטים עם בעיה'];
+const DEVICE_HEADERS = ['מספר זיהוי (הנדסה רפואית)', 'סוג מכשיר', 'מיקום', 'בצ׳קליסט בנות שירות', 'בצ׳קליסט מנקים', 'סטטוס', 'הערות'];
+const DEVTYPE_HEADERS = ['סוג מכשיר', 'כמות תקן'];
+const REPAIR_HEADERS = ['מספר זיהוי', 'סוג מכשיר', 'תאריך שליחה', 'תקלה / סיבה', 'תאריך חזרה', 'הערת חזרה', 'סטטוס'];
+const CONS_HEADERS = ['מזהה', 'פריט', 'קטגוריה', 'יחידת מידה', 'כמות תקן'];
+const ORDER_HEADERS = ['מזהה הזמנה', 'תאריך', 'בת שירות', 'פריט', 'קטגוריה', 'יחידה', 'תקן', 'מלאי קיים', 'להזמנה'];
 const ISSUE_HEADERS = ['מזהה', 'תאריך דיווח', 'פריט', 'ארון / מיקום', 'סוג', 'כמות תקן', 'נמצאו בפועל', 'להשלים',
   'דווח ע"י', 'צוות', 'הערה', 'סטטוס', 'תאריך טיפול', 'מזהה פריט'];
 
@@ -87,6 +97,10 @@ function handle_(p) {
       case 'verifyPin': data = verifyPin(p.pin); break;
       case 'submitCheck': data = submitCheck(p); break;
       case 'resolveIssue': data = resolveIssue(p.mgrPin, p.id); break;
+      case 'submitDeviceCheck': data = submitDeviceCheck(p); break;
+      case 'submitOrder': data = submitOrder(p); break;
+      case 'sendToRepair': data = sendToRepair(p.mgrPin, p.deviceId, p.reason); break;
+      case 'returnFromRepair': data = returnFromRepair(p.mgrPin, p.deviceId, p.note); break;
       default: throw new Error('פעולה לא מוכרת.');
     }
     return json_({ ok: true, data: data });
@@ -114,7 +128,7 @@ function setup() {
   items.getRange(2, 4, N, 1).setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(Object.values(TEAM_HE)).setAllowInvalid(false).build());
   items.getRange(2, 5, N, 1).setDataValidation(SpreadsheetApp.newDataValidation()
-    .requireValueInList(Object.values(FREQ_HE)).setAllowInvalid(false).build());
+    .requireValueInList(Object.values(GEN_FREQ_HE)).setAllowInvalid(false).build());
   items.getRange(2, 6, N, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   items.getRange(2, 7, N, 1).setDataValidation(SpreadsheetApp.newDataValidation()
     .requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(false)
@@ -164,6 +178,7 @@ function setup() {
     if (Object.values(SH).indexOf(s.getName()) === -1 && s.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(s);
   });
 
+  setupV2();
   installDailyTrigger();
   Logger.log('ההתקנה הסתיימה. הקודים נמצאים בגיליון "הגדרות".');
 }
@@ -193,10 +208,14 @@ function getState(mgrPin) {
     const k = c.team + '|' + c.freq;
     if (!last[k] || c.at > last[k].at) last[k] = { at: c.at, by: c.by };
   });
-  const res = { unit: s.unit, items: items, last: last, isMgr: isMgr };
+  const res = { unit: s.unit, items: items, last: last, isMgr: isMgr,
+    devices: readDevices_().map(d => ({ id: d.id, type: d.type, location: d.location, vol: d.vol, clean: d.clean, status: d.status })),
+    devTypes: readDevTypes_(), consumables: readConsumables_() };
   if (isMgr) {
     res.openIssues = readIssues_().filter(x => x.status === 'open').sort((a, b) => (a.at < b.at ? 1 : -1));
     res.recent = checks.slice().sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 15);
+    res.repairs = readRepairs_().filter(r => r.open).map(r => ({ id: r.id, type: r.type, sentAt: r.sentAt, reason: r.reason }));
+    res.lastOrder = lastOrder_();
     res.sheetUrl = ss_().getUrl();
   }
   return res;
@@ -207,7 +226,7 @@ function submitCheck(p) {
   const s = settings_();
   const pin = String(p.pin || '').trim();
   if (!pin || (pin !== s.staffPin && pin !== s.managerPin)) throw new Error('קוד המחלקה שגוי.');
-  if (!TEAM_HE[p.team] || !FREQ_HE[p.freq]) throw new Error('נתוני הבדיקה לא תקינים. רענן/י את הדף.');
+  if (!TEAM_HE[p.team] || !GEN_FREQ_HE[p.freq]) throw new Error('נתוני הבדיקה לא תקינים. רענן/י את הדף.');
   const by = String(p.by || '').trim().slice(0, 60);
   if (!by) throw new Error('יש להזין שם בודק/ת.');
   const results = p.results || {}, found = p.found || {};
@@ -269,6 +288,227 @@ function resolveIssue(mgrPin, id) {
   return getState(mgrPin);
 }
 
+/* ---------------- medical devices, repairs, weekly order ---------------- */
+
+/** Creates the device / repair / consumables / order tabs. Safe to run again. */
+function setupV2() {
+  const N = 500;
+  const dev = sheet_(SH.devices, DEVICE_HEADERS);
+  dev.getRange(2, 4, N, 2).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  dev.getRange(2, 6, N, 1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInList([DEV_ACTIVE, DEV_REPAIR]).setAllowInvalid(false)
+    .setHelpText('הסטטוס מתעדכן מהאתר כשמכשיר נשלח לתיקון או חוזר. ריק = פעיל.').build());
+  dev.getRange(2, 1, N, 1).setNumberFormat('@');
+  dev.getRange('A1').setNote('המספר שמודבק על המכשיר מטעם הנדסה רפואית. כל מכשיר בשורה נפרדת.');
+  dev.setColumnWidth(1, 190).setColumnWidth(2, 200).setColumnWidth(3, 160).setColumnWidth(4, 130)
+    .setColumnWidth(5, 110).setColumnWidth(6, 90).setColumnWidth(7, 240);
+
+  const types = sheet_(SH.devTypes, DEVTYPE_HEADERS);
+  types.getRange(2, 2, N, 1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(false).build());
+  types.getRange('A1').setNote('שם הסוג חייב להיות זהה לעמודה "סוג מכשיר" בלשונית מכשור רפואי.');
+  types.setColumnWidth(1, 220).setColumnWidth(2, 100);
+
+  const rep = sheet_(SH.repairs, REPAIR_HEADERS);
+  rep.getRange('C2:C').setNumberFormat('dd/MM/yyyy HH:mm');
+  rep.getRange('E2:E').setNumberFormat('dd/MM/yyyy HH:mm');
+  rep.setColumnWidth(1, 170).setColumnWidth(2, 180).setColumnWidth(4, 260).setColumnWidth(6, 220);
+
+  const cons = sheet_(SH.consumables, CONS_HEADERS);
+  cons.getRange(2, 5, N, 1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(false).build());
+  cons.getRange('A1').setNote('מזהה פנימי. נוצר אוטומטית, אין צורך למלא.');
+  cons.getRange('A2:A').setFontColor('#8a969c');
+  cons.setColumnWidth(1, 80).setColumnWidth(2, 300).setColumnWidth(3, 160).setColumnWidth(4, 110).setColumnWidth(5, 90);
+
+  const ord = sheet_(SH.orders, ORDER_HEADERS);
+  ord.getRange('B2:B').setNumberFormat('dd/MM/yyyy HH:mm');
+  ord.setColumnWidth(2, 130).setColumnWidth(3, 130).setColumnWidth(4, 260);
+}
+
+function readDevices_() {
+  return readRows_(SH.devices, 2000).map(o => {
+    const r = o.r;
+    return { row: o.row, id: String(r[0]).trim(), type: String(r[1]).trim() || 'ללא סוג', location: String(r[2] || '').trim(),
+      vol: r[3] === true, clean: r[4] === true, status: String(r[5]).trim() === DEV_REPAIR ? 'repair' : 'active' };
+  }).filter(d => d.id);
+}
+
+function readDevTypes_() {
+  const out = {};
+  readRows_(SH.devTypes, 500).forEach(o => {
+    const t = String(o.r[0]).trim(), q = num_(o.r[1]);
+    if (t && q !== null) out[t] = q;
+  });
+  return out;
+}
+
+function readConsumables_() {
+  const sh = ss_().getSheetByName(SH.consumables);
+  return readRows_(SH.consumables, 1000).map(o => {
+    const r = o.r, name = String(r[1]).trim();
+    if (!name) return null;
+    let id = String(r[0]).trim();
+    if (!id) { id = 'c' + Utilities.getUuid().slice(0, 8); sh.getRange(o.row, 1).setValue(id); }
+    return { id: id, name: name, category: String(r[2] || '').trim() || 'כללי', unit: String(r[3] || '').trim(), qty: num_(r[4]) };
+  }).filter(Boolean);
+}
+
+function readRepairs_() {
+  return readRows_(SH.repairs, 3000).map(o => {
+    const r = o.r;
+    return { row: o.row, id: String(r[0]).trim(), type: String(r[1]), sentAt: iso_(r[2]), reason: String(r[3] || ''),
+      open: String(r[6]).trim() === DEV_REPAIR };
+  }).filter(r => r.id && r.sentAt);
+}
+
+function lastOrder_() {
+  const rows = readRows_(SH.orders, 1500).map(o => o.r);
+  if (!rows.length) return null;
+  const lastId = String(rows[rows.length - 1][0]);
+  const mine = rows.filter(r => String(r[0]) === lastId);
+  return { id: lastId, at: iso_(mine[0][1]), by: String(mine[0][2]),
+    lines: mine.map(r => ({ name: String(r[3]), category: String(r[4]), unit: String(r[5]), qty: num_(r[6]), stock: num_(r[7]), order: num_(r[8]) || 0 })) };
+}
+
+function staffAuth_(p) {
+  const s = settings_();
+  const pin = String(p.pin || '').trim();
+  if (!pin || (pin !== s.staffPin && pin !== s.managerPin)) throw new Error('קוד המחלקה שגוי.');
+  const by = String(p.by || '').trim().slice(0, 60);
+  if (!by) throw new Error('יש להזין שם בודק/ת.');
+  return { s: s, by: by };
+}
+
+function submitDeviceCheck(p) {
+  p = p || {};
+  const a = staffAuth_(p), s = a.s, by = a.by;
+  const results = p.results || {};
+  const all = readDevices_().filter(d => d.vol);
+  const list = all.filter(d => d.status === 'active');
+  if (!all.length) throw new Error('אין מכשירים ברשימה.');
+  if (list.some(d => ['found', 'missing'].indexOf(results[d.id]) === -1))
+    throw new Error('רשימת המכשירים עודכנה בזמן הבדיקה. רענן/י את הדף וסמן/י שוב.');
+  const reqs = readDevTypes_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  const created = [];
+  const shortages = [];
+  try {
+    const now = new Date();
+    const notes = String(p.notes || '').trim().slice(0, 500);
+    const missing = list.filter(d => results[d.id] === 'missing');
+    const byType = {};
+    all.forEach(d => { byType[d.type] = byType[d.type] || 0; if (d.status === 'active' && results[d.id] === 'found') byType[d.type]++; });
+    Object.keys(byType).forEach(t => { if (reqs[t] !== undefined && byType[t] < reqs[t]) shortages.push(t + ': נמצאו ' + byType[t] + ' מתוך ' + reqs[t]); });
+    ss_().getSheetByName(SH.checks).appendRow([now, TEAM_HE.volunteers, FREQ_HE.devices, by, missing.length, list.length, notes,
+      missing.map(d => d.type + ' ' + d.id + ' – לא נמצא').concat(shortages).join('; ')]);
+    const ish = ss_().getSheetByName(SH.issues);
+    const open = readIssues_().filter(x => x.status === 'open');
+    missing.forEach(d => {
+      const itemId = 'dev:' + d.id;
+      if (open.some(x => x.itemId === itemId)) return;
+      const name = d.type + ' (' + d.id + ')';
+      ish.appendRow(['x' + Utilities.getUuid().slice(0, 8), now, name, d.location || 'מכשור רפואי', TYPE_HE.missing,
+        '', '', '', by, TEAM_HE.volunteers, notes, STATUS_OPEN, '', itemId]);
+      created.push({ i: { name: name, cabinet: d.location || 'מכשור רפואי', critical: false, qty: null }, type: 'missing', f: null, need: '' });
+    });
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  if (created.length && s.email) {
+    try { sendIssueAlert_(s, created, by, 'volunteers', [p.notes, shortages.join('\n')].filter(Boolean).join('\n')); } catch (e) { Logger.log(e); }
+  }
+  return getState(p.mgrPin);
+}
+
+function submitOrder(p) {
+  p = p || {};
+  const a = staffAuth_(p), s = a.s, by = a.by;
+  const stock = p.stock || {};
+  const cons = readConsumables_();
+  if (!cons.length) throw new Error('אין פריטים ברשימת המתכלים.');
+  if (cons.some(c => num_(stock[c.id]) === null)) throw new Error('רשימת הפריטים עודכנה. רענן/י את הדף ומלא/י שוב.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  let lines;
+  try {
+    const now = new Date();
+    const oid = 'o' + Utilities.formatDate(now, TZ, 'yyMMddHHmm') + Utilities.getUuid().slice(0, 3);
+    lines = cons.map(c => {
+      const st = num_(stock[c.id]);
+      const ord = c.qty === null ? 0 : Math.max(0, c.qty - st);
+      return { c: c, stock: st, order: ord };
+    });
+    const rows = lines.map(l => [oid, now, by, l.c.name, l.c.category, l.c.unit, l.c.qty === null ? '' : l.c.qty, l.stock, l.order]);
+    const sh = ss_().getSheetByName(SH.orders);
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, ORDER_HEADERS.length).setValues(rows);
+    const toOrder = lines.filter(l => l.order > 0);
+    const notes = String(p.notes || '').trim().slice(0, 500);
+    ss_().getSheetByName(SH.checks).appendRow([now, TEAM_HE.volunteers, FREQ_HE.order, by, toOrder.length, lines.length, notes,
+      toOrder.map(l => l.c.name + ' – ' + l.order + (l.c.unit ? ' ' + l.c.unit : '')).join('; ')]);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  if (s.email) {
+    try { sendOrderEmail_(s, lines, by, p.notes); } catch (e) { Logger.log(e); }
+  }
+  return getState(p.mgrPin);
+}
+
+function sendOrderEmail_(s, lines, by, notes) {
+  const toOrder = lines.filter(l => l.order > 0);
+  const cats = {};
+  toOrder.forEach(l => { (cats[l.c.category] = cats[l.c.category] || []).push(l); });
+  const body = 'הזמנה שבועית – ציוד מתכלה\nמולא ע"י ' + by + ', ' + Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm') + '\n\n' +
+    (toOrder.length ? Object.keys(cats).map(c => c + ':\n' + cats[c].map(l =>
+      '• ' + l.c.name + ' – להזמנה ' + l.order + (l.c.unit ? ' ' + l.c.unit : '') + ' (תקן ' + l.c.qty + ', במלאי ' + l.stock + ')').join('\n')).join('\n\n')
+      : 'אין צורך להזמין השבוע. כל הפריטים במלאי מלא.') +
+    (notes ? '\n\nהערה: ' + notes : '') + '\n\nלוח מנהל: ' + SITE_URL;
+  MailApp.sendEmail({ to: s.email, subject: "הזמנה שבועית – חדר טראומה: " + toOrder.length + ' פריטים להזמנה', body: body });
+}
+
+function mgrAuth_(mgrPin) {
+  if (String(mgrPin || '').trim() !== settings_().managerPin) throw new Error('קוד המנהל שגוי.');
+}
+
+function sendToRepair(mgrPin, deviceId, reason) {
+  mgrAuth_(mgrPin);
+  deviceId = String(deviceId || '').trim();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const d = readDevices_().filter(x => x.id === deviceId)[0];
+    if (!d) throw new Error('המכשיר לא נמצא ברשימה.');
+    if (d.status === 'repair') throw new Error('המכשיר כבר מסומן בתיקון.');
+    ss_().getSheetByName(SH.devices).getRange(d.row, 6).setValue(DEV_REPAIR);
+    ss_().getSheetByName(SH.repairs).appendRow([d.id, d.type, new Date(), String(reason || '').trim().slice(0, 300), '', '', DEV_REPAIR]);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return getState(mgrPin);
+}
+
+function returnFromRepair(mgrPin, deviceId, note) {
+  mgrAuth_(mgrPin);
+  deviceId = String(deviceId || '').trim();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const d = readDevices_().filter(x => x.id === deviceId)[0];
+    if (d) ss_().getSheetByName(SH.devices).getRange(d.row, 6).setValue(DEV_ACTIVE);
+    const r = readRepairs_().filter(x => x.id === deviceId && x.open).pop();
+    if (r) ss_().getSheetByName(SH.repairs).getRange(r.row, 5, 1, 3).setValues([[new Date(), String(note || '').trim().slice(0, 300), 'הוחזר']]);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return getState(mgrPin);
+}
+
 /* ---------------- alerts ---------------- */
 
 function sendIssueAlert_(s, created, by, team, notes) {
@@ -300,18 +540,21 @@ function dailyReport() {
   checks.forEach(c => { const k = c.team + '|' + c.freq; if (!last[k] || c.at > last[k].at) last[k] = c; });
   const combos = {};
   items.forEach(i => { combos[i.team + '|' + i.freq] = true; });
+  if (readDevices_().some(d => d.vol)) combos['volunteers|devices'] = true;
+  if (readConsumables_().length) combos['volunteers|order'] = true;
   const late = [];
   Object.keys(combos).forEach(k => {
     const t = k.split('|')[0], f = k.split('|')[1], l = last[k];
-    const label = TEAM_HE[t] + ' – בדיקה ' + FREQ_HE[f];
+    const label = TEAM_HE[t] + ' – ' + FREQ_HE[f];
     if (!l) { late.push('• ' + label + ': טרם בוצעה'); return; }
     const d = new Date(l.at);
-    const overdue = f === 'daily'
+    const overdue = DAILY_KEYS[f]
       ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd') < yesterday
       : (now - d) / 864e5 > FREQ_DAYS[f];
     if (overdue) late.push('• ' + label + ': אחרונה ' + Utilities.formatDate(d, TZ, 'dd/MM HH:mm') + ' (' + l.by + ')');
   });
   const open = readIssues_().filter(x => x.status === 'open');
+  const inRepair = readRepairs_().filter(r => r.open);
   if (!late.length && !open.length) return;
   const issueLines = open.map(x => {
     let t = '• ' + x.itemName + ' (' + x.cabinet + ') – ' + TYPE_HE[x.type];
@@ -320,6 +563,8 @@ function dailyReport() {
   });
   const body = (open.length ? 'להשלמה ולתיקון (' + open.length + '):\n' + issueLines.join('\n') + '\n\n' : '') +
     (late.length ? 'בדיקות שלא בוצעו בזמן:\n' + late.join('\n') + '\n\n' : '') +
+    (inRepair.length ? 'מכשירים בתיקון (' + inRepair.length + '):\n' + inRepair.map(r => '• ' + r.type + ' ' + r.id + ' · מאז ' +
+      Utilities.formatDate(new Date(r.sentAt), TZ, 'dd/MM')).join('\n') + '\n\n' : '') +
     'לוח מנהל: ' + SITE_URL;
   MailApp.sendEmail({ to: s.email, subject: "צ'קליסט טראומה – סיכום בוקר: " + (open.length + late.length) + ' דורשים טיפול', body: body });
 }
@@ -384,6 +629,7 @@ function readIssues_() {
 
 function readRows_(name, n) {
   const sh = ss_().getSheetByName(name);
+  if (!sh) return [];
   const last = sh.getLastRow();
   if (last < 2) return [];
   const start = Math.max(2, last - n + 1);

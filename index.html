@@ -96,6 +96,19 @@ h3{font-size:13px;letter-spacing:.04em;color:var(--muted);margin:0;font-weight:6
 .muted{color:var(--muted)}
 .empty{color:var(--muted);margin:0}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
+.devid{font-family:var(--f-mono);font-weight:500;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:embed}
+.cnt-chip{font-size:12px;font-weight:600;color:var(--muted);margin-inline-start:8px;letter-spacing:0}
+.cnt-chip.short{color:var(--crit)}
+.row.s-repair{background:var(--bg);color:var(--muted)}
+.pill.repair{background:var(--warn-bg);color:var(--warn)}
+.opts button[data-v="found"][aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:#fff}
+.ohead,.orow{display:grid;grid-template-columns:minmax(0,1fr) 44px 72px 60px;gap:8px;align-items:center;padding:8px 14px;border-top:1px solid var(--line)}
+.ohead{font-size:12px;color:var(--muted);font-weight:600;padding-block:6px}
+.orow input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 4px;font-variant-numeric:tabular-nums;text-align:center}
+.num{text-align:center;font-variant-numeric:tabular-nums}
+.toorder{font-weight:700;color:var(--muted)} .toorder.pos{color:var(--warn)}
+.formrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.formrow select,.formrow input{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0;flex:1 1 200px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:20;font-weight:600;max-width:calc(100% - 32px)}
 .toast.err{background:var(--crit);color:#fff}
 @media (prefers-reduced-motion:no-preference){.row,.opts button{transition:background-color .15s,border-color .15s}}
@@ -117,19 +130,19 @@ h3{font-size:13px;letter-spacing:.04em;color:var(--muted);margin:0;font-weight:6
 <div class="toast" id="toast" hidden></div>
 
 <script>
-const FREQ={daily:{label:'יומית',days:1},weekly:{label:'שבועית',days:7},monthly:{label:'חודשית',days:31}};
-const FREQ_ORDER=['daily','weekly','monthly'];
+const FREQ={devices:{label:'מכשור רפואי – יומי',days:1,daily:true},daily:{label:'ציוד – יומי',days:1,daily:true},order:{label:'הזמנה שבועית',days:7},weekly:{label:'ציוד – שבועי',days:7},monthly:{label:'ציוד – חודשי',days:31}};
+const FREQ_ORDER=['devices','daily','order','weekly','monthly'];
 const TEAM={nurses:'אחיות',volunteers:'בנות שירות'};
 const TYPE={missing:'חסר',broken:'תקול'};
 const TZ='Asia/Jerusalem';
 const store={get(k){try{return localStorage.getItem(k)||''}catch(e){return''}},set(k,v){try{v?localStorage.setItem(k,v):localStorage.removeItem(k)}catch(e){}}};
 
-const S={loaded:false,error:'',items:[],last:{},openIssues:[],recent:[],isMgr:false,sheetUrl:'',unit:''};
+const S={loaded:false,error:'',items:[],last:{},openIssues:[],recent:[],isMgr:false,sheetUrl:'',unit:'',devices:[],devTypes:{},consumables:[],repairs:[],lastOrder:null};
 let view=['nurses','volunteers','manager'].includes(store.get('view'))?store.get('view'):'nurses';
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
-const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:''};
+const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:''};
 let busy=false,pending=false;
 
 const $=s=>document.querySelector(s);
@@ -137,7 +150,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const dayKey=d=>new Date(d).toLocaleDateString('en-CA',{timeZone:TZ});
 const fmt=iso=>new Date(iso).toLocaleString('he-IL',{timeZone:TZ,weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 const API_URL=(window.TRAUMA_CONFIG&&window.TRAUMA_CONFIG.apiUrl)||'';
-const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,resolveIssue:['mgrPin','id']};
+const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,submitDeviceCheck:null,submitOrder:null,resolveIssue:['mgrPin','id'],sendToRepair:['mgrPin','deviceId','reason'],returnFromRepair:['mgrPin','deviceId','note']};
 async function api(fn,...args){
   if(!API_URL)throw new Error('האתר עדיין לא מחובר לגיליון הנתונים.');
   const body=ARGS[fn]?Object.fromEntries(ARGS[fn].map((k,i)=>[k,args[i]])):Object.assign({},args[0]);
@@ -152,12 +165,18 @@ async function api(fn,...args){
 const cleanErr=e=>String((e&&e.message)||e||'').replace(/^(Error|Exception|שגיאה):\s*/,'')||'הפעולה נכשלה. בדוק/י חיבור ונסה/י שוב.';
 
 function teamItems(team,freq){return S.items.filter(i=>i.team===team&&(!freq||i.freq===freq))}
-function teamFreqs(team){return FREQ_ORDER.filter(f=>S.items.some(i=>i.team===team&&i.freq===f))}
+function teamFreqs(team){return FREQ_ORDER.filter(f=>{
+  if(f==='devices')return team==='volunteers'&&S.devices.some(d=>d.vol);
+  if(f==='order')return team==='volunteers'&&S.consumables.length>0;
+  return S.items.some(i=>i.team===team&&i.freq===f)})}
+const volDevices=()=>S.devices.filter(x=>x.vol);
+const filled=v=>v!=null&&String(v).trim()!=='';
+function orderQty(c,v){if(!filled(v)||c.qty==null)return null;return Math.max(0,c.qty-Math.max(0,Math.round(Number(v))))}
 function combos(){const out=[];for(const t of Object.keys(TEAM))for(const f of teamFreqs(t))out.push([t,f]);return out}
 function due(team,freq){
   const c=S.last[team+'|'+freq];
   if(!c)return{state:'never'};
-  if(freq==='daily')return{state:dayKey(c.at)===dayKey(Date.now())?'done':'overdue',c};
+  if(FREQ[freq].daily)return{state:dayKey(c.at)===dayKey(Date.now())?'done':'overdue',c};
   return{state:(Date.now()-new Date(c.at))/864e5<=FREQ[freq].days?'done':'overdue',c};
 }
 function alertCount(){return S.isMgr?S.openIssues.length+combos().filter(([t,f])=>due(t,f).state!=='done').length:0}
@@ -170,6 +189,7 @@ function toast(msg,kind){const t=$('#toast');t.textContent=msg;t.className='toas
 function apply(s){
   S.loaded=true;S.error='';S.items=s.items||[];S.last=s.last||{};S.unit=s.unit||'';S.isMgr=!!s.isMgr;
   S.openIssues=s.openIssues||[];S.recent=s.recent||[];S.sheetUrl=s.sheetUrl||'';
+  S.devices=s.devices||[];S.devTypes=s.devTypes||{};S.consumables=s.consumables||[];S.repairs=s.repairs||[];S.lastOrder=s.lastOrder||null;
   if(mgrPin&&!S.isMgr){mgrPin='';store.set('mgrPin','')}
   scheduleRender();
 }
@@ -199,34 +219,68 @@ function checkView(team){
   if(!freqs.length)return`<div class="panel"><h2>אין עדיין פריטים לבדיקה של ${TEAM[team]}</h2><p class="empty">המנהל מוסיף פריטים בגיליון "ציוד".</p></div>`;
   if(!freqs.includes(selFreq[team]))selFreq[team]=freqs.find(f=>due(team,f).state!=='done')||freqs[0];
   const f=selFreq[team],key=team+'|'+f,d=draft[key]||{},ds=due(team,f);
-  const status=ds.state==='never'?'<b>טרם בוצעה בדיקה '+FREQ[f].label+'.</b>':
+  const status=ds.state==='never'?'<b>טרם בוצע: '+FREQ[f].label+'.</b>':
     ds.state==='done'?`בוצעה <b>${fmt(ds.c.at)}</b> ע"י ${esc(ds.c.by)}`:
     `<b style="color:var(--crit)">באיחור.</b> בדיקה אחרונה ${fmt(ds.c.at)} ע"י ${esc(ds.c.by)}`;
-  const groups=[],by={};
-  for(const i of teamItems(team,f)){if(!by[i.cabinet]){by[i.cabinet]=[];groups.push(i.cabinet)}by[i.cabinet].push(i)}
   const pinUi=(staffPin||mgrPin)?`<p class="statusline">קוד המחלקה שמור במכשיר הזה. <button class="linkbtn" data-act="forgetpin">החלפת קוד</button></p>`:
     `<div class="field"><label for="spin">קוד מחלקה</label><input id="spin" type="password" inputmode="numeric" autocomplete="off" value="${esc(st.pinDraft)}" placeholder="מקבלים מהמנהל"></div>`;
   return`<section class="panel">
-    <h2>בדיקת ${TEAM[team]}</h2>
+    <h2>${TEAM[team]}</h2>
     <div class="seg" role="group" aria-label="תדירות">${freqs.map(x=>`<button data-act="freq" data-f="${x}" aria-pressed="${x===f}"><span class="dot ${due(team,x).state}"></span>${FREQ[x].label}</button>`).join('')}</div>
     <p class="statusline">${status}</p>
+    ${f==='order'?'<p class="statusline">ממלאים כמה יש במלאי מכל פריט. הכמות להזמנה מחושבת לבד: תקן פחות מלאי.</p>':f==='devices'?'<p class="statusline">מסמנים לכל מכשיר אם הוא נמצא במקומו. מכשיר בתיקון מסומן אוטומטית.</p>':''}
     <div class="field"><label for="checker">שם הבודק/ת</label><input id="checker" autocomplete="name" value="${esc(st.name)}" placeholder="שם מלא"></div>
     ${pinUi}
   </section>
-  ${groups.map(g=>`<section class="cab"><div class="cab-h"><h3>${esc(g)}</h3><button class="linkbtn" data-act="allok" data-cab="${esc(g)}">הכל תקין</button></div>
+  ${f==='devices'?devicesBody(key,d):f==='order'?orderBody(key):genericBody(team,f,key,d)}
+  <section class="panel"><div class="field"><label for="note">הערות (לא חובה)</label><textarea id="note" placeholder="${f==='order'?'למשל: צריך גם כפפות L בדחיפות':'למשל: נשארו 2 טובוסים 7.5, הוזמנו מהמחסן'}">${esc(st.note)}</textarea></div></section>`;
+}
+
+function genericBody(team,f,key,d){
+  const groups=[],by={};
+  for(const i of teamItems(team,f)){if(!by[i.cabinet]){by[i.cabinet]=[];groups.push(i.cabinet)}by[i.cabinet].push(i)}
+  return`${groups.map(g=>`<section class="cab"><div class="cab-h"><h3>${esc(g)}</h3><button class="linkbtn" data-act="allok" data-cab="${esc(g)}">הכל תקין</button></div>
     ${by[g].map(i=>`<div class="row s-${d[i.id]||'none'}"><div class="iname">${esc(i.name)}${i.critical?'<span class="tag">קריטי</span>':''}${i.qty?`<span class="qty">תקן: ${i.qty}</span>`:''}</div>
       <div class="opts" role="group" aria-label="${esc(i.name)}">${['ok','missing','broken'].map(v=>`<button data-act="mark" data-id="${esc(i.id)}" data-v="${v}" aria-pressed="${d[i.id]===v}">${v==='ok'?'תקין':TYPE[v]}</button>`).join('')}</div>
       ${d[i.id]==='missing'?`<div class="cntrow"><label for="c-${esc(i.id)}">כמה יש בפועל?</label><input type="number" min="0" inputmode="numeric" class="cnt" id="c-${esc(i.id)}" data-id="${esc(i.id)}" value="${esc(cnt[key+'|'+i.id])}">${i.qty?`<span class="muted">מתוך ${i.qty}</span>`:''}</div>`:''}</div>`).join('')}
-  </section>`).join('')}
-  <section class="panel"><div class="field"><label for="note">הערות (לא חובה)</label><textarea id="note" placeholder="למשל: נשארו 2 טובוסים 7.5, הוזמנו מהמחסן">${esc(st.note)}</textarea></div></section>`;
+  </section>`).join('')}`;
+}
+
+function devicesBody(key,d){
+  const types=[],by={};
+  volDevices().forEach(x=>{if(!by[x.type]){by[x.type]=[];types.push(x.type)}by[x.type].push(x)});
+  const loc=x=>x.location?` <span class="muted">· ${esc(x.location)}</span>`:'';
+  return types.map(t=>{
+    const list=by[t],req=S.devTypes[t],act=list.filter(x=>x.status==='active');
+    const found=act.filter(x=>d[x.id]==='found').length,rep=list.length-act.length,done=act.every(x=>d[x.id]);
+    const short=req!=null&&done&&found<req;
+    return`<section class="cab"><div class="cab-h"><h3>${esc(t)}<span class="cnt-chip${short?' short':''}">נמצאו ${found}${req!=null?' מתוך תקן '+req:''}${rep?' · '+rep+' בתיקון':''}</span></h3>${act.length?`<button class="linkbtn" data-act="allok" data-cab="${esc(t)}">כולם נמצאו</button>`:''}</div>
+    ${list.map(x=>x.status==='repair'?`<div class="row s-repair"><div class="iname"><span class="devid">${esc(x.id)}</span>${loc(x)}</div><span class="pill repair">בתיקון</span></div>`:
+      `<div class="row s-${d[x.id]==='found'?'ok':d[x.id]||'none'}"><div class="iname"><span class="devid">${esc(x.id)}</span>${loc(x)}</div>
+      <div class="opts" role="group" aria-label="${esc(t+' '+x.id)}">${[['found','נמצא'],['missing','לא נמצא']].map(([v,l])=>`<button data-act="mark" data-id="${esc(x.id)}" data-v="${v}" aria-pressed="${d[x.id]===v}">${l}</button>`).join('')}</div></div>`).join('')}
+    </section>`}).join('');
+}
+
+function orderBody(key){
+  const cats=[],by={};
+  S.consumables.forEach(c=>{if(!by[c.category]){by[c.category]=[];cats.push(c.category)}by[c.category].push(c)});
+  return cats.map(cat=>`<section class="cab"><div class="cab-h"><h3>${esc(cat)}</h3></div>
+    <div class="ohead" aria-hidden="true"><span>פריט</span><span class="num">תקן</span><span class="num">במלאי</span><span class="num">להזמנה</span></div>
+    ${by[cat].map(c=>{const v=cnt[key+'|'+c.id],q=orderQty(c,v);return`<div class="orow"><div class="iname">${esc(c.name)}${c.unit?` <span class="muted">(${esc(c.unit)})</span>`:''}</div>
+      <span class="num">${c.qty==null?'—':c.qty}</span>
+      <input type="number" min="0" inputmode="numeric" class="stock" id="s-${esc(c.id)}" data-id="${esc(c.id)}" value="${esc(v)}" aria-label="מלאי קיים: ${esc(c.name)}">
+      <span class="num toorder${q?' pos':''}" id="o-${esc(c.id)}">${q==null?'—':q}</span></div>`}).join('')}
+  </section>`).join('');
 }
 
 function updateProgress(){
   const team=view,f=selFreq[team];if(!f)return;
-  const list=teamItems(team,f),d=draft[team+'|'+f]||{};
-  const marked=list.filter(i=>d[i.id]).length,probs=list.filter(i=>d[i.id]&&d[i.id]!=='ok').length;
-  $('#progress').textContent=`${marked}/${list.length} סומנו`+(probs?` · ${probs} בעיות`:'');
-  $('#submit').disabled=busy;$('#submit').textContent=busy?'שומר…':'שמירת בדיקה';
+  const key=team+'|'+f,d=draft[key]||{};let txt;
+  if(f==='devices'){const act=volDevices().filter(x=>x.status==='active');const m=act.filter(x=>d[x.id]).length,miss=act.filter(x=>d[x.id]==='missing').length;txt=`${m}/${act.length} סומנו`+(miss?` · ${miss} לא נמצאו`:'')}
+  else if(f==='order'){const fl=S.consumables.filter(c=>filled(cnt[key+'|'+c.id])).length,n=S.consumables.filter(c=>orderQty(c,cnt[key+'|'+c.id])>0).length;txt=`${fl}/${S.consumables.length} מולאו`+(n?` · ${n} להזמנה`:'')}
+  else{const list=teamItems(team,f);const marked=list.filter(i=>d[i.id]).length,probs=list.filter(i=>d[i.id]&&d[i.id]!=='ok').length;txt=`${marked}/${list.length} סומנו`+(probs?` · ${probs} בעיות`:'')}
+  $('#progress').textContent=txt;
+  $('#submit').disabled=busy;$('#submit').textContent=busy?'שומר…':f==='order'?'שליחת הזמנה':'שמירת בדיקה';
 }
 
 function managerView(){
@@ -242,14 +296,28 @@ function managerView(){
   const issueList=open.length?`<div class="list">${open.map(x=>`<div class="li"><div class="main"><span><b>${esc(x.itemName)}</b> <span class="pill ${x.type}">${TYPE[x.type]}</span></span>
       ${qtyLine(x)?`<span><b>${qtyLine(x)}</b></span>`:''}<span class="muted">${esc(x.cabinet)} · דווח ע"י ${esc(x.by)}${x.team?' ('+TEAM[x.team]+')':''}</span>${x.note?`<span class="muted">"${esc(x.note)}"</span>`:''}<span class="mono">${fmt(x.at)}</span></div>
       <button class="btn small" data-act="resolve" data-id="${esc(x.id)}">הושלם</button></div>`).join('')}</div>`:'<p class="empty">אין חוסרים או תקלות פתוחים.</p>';
-  const recentList=S.recent.length?`<div class="list">${S.recent.map(c=>`<div class="li"><div class="main"><span><b>${TEAM[c.team]}</b> · בדיקה ${FREQ[c.freq].label} · ${esc(c.by)}</span>${c.notes?`<span class="muted">"${esc(c.notes)}"</span>`:''}</div>
+  const days=iso=>Math.max(0,Math.floor((Date.now()-new Date(iso))/864e5));
+  const repList=S.repairs.length?`<div class="list">${S.repairs.map(r=>`<div class="li"><div class="main"><span><b>${esc(r.type)}</b> <span class="devid">${esc(r.id)}</span></span>
+      ${r.reason?`<span class="muted">${esc(r.reason)}</span>`:''}<span class="mono">נשלח ${fmt(r.sentAt)} · ${days(r.sentAt)} ימים בתיקון</span></div>
+      <button class="btn small" data-act="ret" data-id="${esc(r.id)}">חזר מתיקון</button></div>`).join('')}</div>`:'<p class="empty">אין כרגע מכשירים בתיקון.</p>';
+  const activeDevs=S.devices.filter(x=>x.status==='active').slice().sort((a,b)=>a.type.localeCompare(b.type,'he')||a.id.localeCompare(b.id));
+  const sendForm=activeDevs.length?`<div class="formrow"><select id="rdev" aria-label="מכשיר לשליחה לתיקון"><option value="">בחירת מכשיר…</option>${activeDevs.map(x=>`<option value="${esc(x.id)}"${st.rdev===x.id?' selected':''}>${esc(x.type)} · ${esc(x.id)}</option>`).join('')}</select>
+      <input id="rreason" placeholder="תקלה / סיבה (לא חובה)" value="${esc(st.rreason)}"><button class="btn" data-act="send">שליחה לתיקון</button></div>`:
+    '<p class="empty">כדי לשלוח מכשיר לתיקון, קודם מוסיפים מכשירים בלשונית "מכשור רפואי" בגיליון.</p>';
+  const lo=S.lastOrder,loLines=lo?lo.lines.filter(l=>l.order>0):[];
+  const orderPanel=lo?`<p class="statusline">מולאה <b>${fmt(lo.at)}</b> ע"י ${esc(lo.by)} · ${loLines.length} פריטים להזמנה</p>
+    ${loLines.length?`<div class="list">${loLines.map(l=>`<div class="li"><div class="main"><span><b>${esc(l.name)}</b></span><span class="muted">${esc(l.category)} · תקן ${l.qty==null?'—':l.qty} · במלאי ${l.stock==null?'—':l.stock}</span></div><span><b>${l.order}</b> ${esc(l.unit)}</span></div>`).join('')}</div>`:'<p class="empty">אין צורך להזמין. כל הפריטים במלאי מלא.</p>'}`:
+    '<p class="empty">עוד לא מולאה הזמנה שבועית.</p>';
+  const recentList=S.recent.length?`<div class="list">${S.recent.map(c=>`<div class="li"><div class="main"><span><b>${TEAM[c.team]}</b> · ${FREQ[c.freq]?FREQ[c.freq].label:''} · ${esc(c.by)}</span>${c.notes?`<span class="muted">"${esc(c.notes)}"</span>`:''}</div>
       <span class="mono">${fmt(c.at)} · ${c.problemCount?`<span style="color:var(--crit)">${c.problemCount} בעיות</span>`:'תקין'}</span></div>`).join('')}</div>`:'<p class="empty">עוד לא נשמרו בדיקות. בדיקה ראשונה תופיע כאן ברגע שתישמר.</p>';
   return`${banner}
   <section class="panel"><h2>סטטוס בדיקות</h2>${stats}</section>
   <section class="panel"><h2>להשלמה ולתיקון</h2>${issueList}</section>
+  <section class="panel"><h2>מכשור רפואי בתיקון</h2>${repList}<h3>שליחת מכשיר לתיקון</h3>${sendForm}</section>
+  <section class="panel"><h2>הזמנה שבועית אחרונה</h2>${orderPanel}</section>
   <section class="panel"><h2>בדיקות אחרונות</h2>${recentList}</section>
-  <section class="panel"><h2>רשימת הציוד והתקנים</h2>
-    <p class="statusline">מוסיפים, מוחקים ומשנים פריטים, ארונות, תדירות וכמות תקן ישירות בגיליון "ציוד". השינוי מופיע כאן אחרי רענון.</p>
+  <section class="panel"><h2>עריכת הרשימות</h2>
+    <p class="statusline">הכל נערך בגיליון: "מכשור רפואי" (מכשיר בכל שורה, עם מספר הנדסה רפואית), "תקן מכשירים" (כמות תקן לכל סוג), "מתכלים" (פריטים להזמנה השבועית) ו"ציוד" (שאר הצ׳קליסטים). השינוי מופיע כאן אחרי רענון.</p>
     <div class="actions">${S.sheetUrl?`<a class="btn ghost" href="${esc(S.sheetUrl)}" target="_blank" rel="noopener">פתיחת הגיליון</a>`:''}<button class="btn ghost" data-act="reload">רענון</button><button class="linkbtn" data-act="logout">יציאה ממצב מנהל</button></div>
   </section>`;
 }
@@ -261,7 +329,15 @@ document.getElementById('main').addEventListener('input',e=>{
   else if(t.id==='note')st.note=t.value;
   else if(t.id==='spin')st.pinDraft=t.value;
   else if(t.id==='mpin')st.mgrDraft=t.value;
+  else if(t.id==='rdev')st.rdev=t.value;
+  else if(t.id==='rreason')st.rreason=t.value;
   else if(t.classList.contains('cnt'))cnt[view+'|'+selFreq[view]+'|'+t.dataset.id]=t.value;
+  else if(t.classList.contains('stock')){
+    const key=view+'|'+selFreq[view];cnt[key+'|'+t.dataset.id]=t.value;
+    const c=S.consumables.find(x=>x.id===t.dataset.id),o=document.getElementById('o-'+t.dataset.id);
+    if(c&&o){const q=orderQty(c,t.value);o.textContent=q==null?'—':q;o.classList.toggle('pos',q>0)}
+    updateProgress();
+  }
 });
 document.getElementById('main').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='mpin'){e.preventDefault();login()}});
 
@@ -282,6 +358,7 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='mark'||act==='allok'){
     const key=view+'|'+selFreq[view];draft[key]=draft[key]||{};
     if(act==='mark'){const cur=draft[key][b.dataset.id];draft[key][b.dataset.id]=cur===b.dataset.v?undefined:b.dataset.v}
+    else if(selFreq[view]==='devices')volDevices().filter(x=>x.status==='active'&&x.type===b.dataset.cab).forEach(x=>{if(!draft[key][x.id])draft[key][x.id]='found'});
     else teamItems(view,selFreq[view]).filter(i=>i.cabinet===b.dataset.cab).forEach(i=>{if(!draft[key][i.id])draft[key][i.id]='ok'});
     const y=window.scrollY;render();window.scrollTo(0,y);return;
   }
@@ -289,27 +366,51 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='reload'){b.disabled=true;await refresh();b.disabled=false;toast('עודכן');return}
   if(act==='login'){login();return}
   if(act==='logout'){mgrPin='';store.set('mgrPin','');S.isMgr=false;S.openIssues=[];render();return}
+  if(act==='send'){
+    const id=st.rdev||($('#rdev')&&$('#rdev').value);if(!id){toast('יש לבחור מכשיר','err');return}
+    b.disabled=true;try{apply(await api('sendToRepair',mgrPin,id,st.rreason));st.rdev='';st.rreason='';render();toast('המכשיר סומן כבתיקון')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
+  if(act==='ret'){b.disabled=true;try{apply(await api('returnFromRepair',mgrPin,b.dataset.id,''));toast('המכשיר חזר לפעילות')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='resolve'){b.disabled=true;try{apply(await api('resolveIssue',mgrPin,b.dataset.id));toast('סומן כהושלם')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}}
 });
 
 document.getElementById('submit').addEventListener('click',async()=>{
   const team=view,f=selFreq[team];if(!f||busy)return;
-  const list=teamItems(team,f),key=team+'|'+f,d=draft[key]||{},name=st.name.trim();
+  const key=team+'|'+f,d=draft[key]||{},name=st.name.trim();
   if(!name){toast('יש להזין שם בודק/ת','err');const el=$('#checker');if(el)el.focus();return}
   const pin=staffPin||mgrPin||st.pinDraft.trim();
   if(!pin){toast('יש להזין קוד מחלקה','err');const el=$('#spin');if(el)el.focus();return}
-  const left=list.filter(i=>!d[i.id]).length;
-  if(left){toast(`נשארו ${left} פריטים לא מסומנים`,'err');return}
-  const results={},found={};
-  list.forEach(i=>{results[i.id]=d[i.id];const v=cnt[key+'|'+i.id];if(d[i.id]==='missing'&&v!=null&&String(v).trim()!=='')found[i.id]=Number(v)});
-  const probs=list.filter(i=>d[i.id]!=='ok').length;
+  let action,payload,okMsg;
+  const base={pin,mgrPin:mgrPin||'',by:name,notes:st.note};
+  if(f==='devices'){
+    const act=volDevices().filter(x=>x.status==='active'),left=act.filter(x=>!d[x.id]).length;
+    if(left){toast(`נשארו ${left} מכשירים לא מסומנים`,'err');return}
+    const results={};act.forEach(x=>results[x.id]=d[x.id]);
+    const miss=act.filter(x=>d[x.id]==='missing').length;
+    action='submitDeviceCheck';payload=Object.assign(base,{results});
+    okMsg=miss?`הבדיקה נשמרה. ${miss} מכשירים שלא נמצאו דווחו למנהל`:'הבדיקה נשמרה. כל המכשירים נמצאו';
+  }else if(f==='order'){
+    const left=S.consumables.filter(c=>!filled(cnt[key+'|'+c.id])).length;
+    if(left){toast(`נשארו ${left} פריטים בלי כמות במלאי`,'err');return}
+    const stock={};S.consumables.forEach(c=>stock[c.id]=Math.max(0,Math.round(Number(cnt[key+'|'+c.id]))));
+    const n=S.consumables.filter(c=>orderQty(c,stock[c.id])>0).length;
+    action='submitOrder';payload=Object.assign(base,{stock});
+    okMsg=n?`ההזמנה נשלחה. ${n} פריטים להזמנה`:'נשמר. אין צורך להזמין השבוע';
+  }else{
+    const list=teamItems(team,f),left=list.filter(i=>!d[i.id]).length;
+    if(left){toast(`נשארו ${left} פריטים לא מסומנים`,'err');return}
+    const results={},found={};
+    list.forEach(i=>{results[i.id]=d[i.id];const v=cnt[key+'|'+i.id];if(d[i.id]==='missing'&&filled(v))found[i.id]=Number(v)});
+    const probs=list.filter(i=>d[i.id]!=='ok').length;
+    action='submitCheck';payload=Object.assign(base,{team,freq:f,results,found});
+    okMsg=probs?`הבדיקה נשמרה. ${probs} דיווחים נשלחו למנהל`:'הבדיקה נשמרה. הכל תקין';
+  }
   busy=true;updateProgress();
   try{
-    const s=await api('submitCheck',{pin,mgrPin:mgrPin||'',team,freq:f,by:name,notes:st.note,results,found});
+    const s=await api(action,payload);
     if(!staffPin&&!mgrPin){staffPin=pin;store.set('staffPin',pin)}
     st.pinDraft='';draft[key]={};st.note='';Object.keys(cnt).forEach(k=>{if(k.startsWith(key+'|'))delete cnt[k]});
     busy=false;apply(s);render();window.scrollTo(0,0);
-    toast(probs?`הבדיקה נשמרה. ${probs} דיווחים נשלחו למנהל`:'הבדיקה נשמרה. הכל תקין');
+    toast(okMsg);
   }catch(err){
     busy=false;const m=cleanErr(err);
     if(/קוד/.test(m)&&staffPin){staffPin='';store.set('staffPin','');render()}
