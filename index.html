@@ -200,7 +200,7 @@ let view=['nurses','volunteers','manager'].includes(store.get('view'))?store.get
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
-const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:true,clean:false}};
+const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:false,clean:false},rq:''};
 let busy=false,pending=false;
 
 const $=s=>document.querySelector(s);
@@ -382,8 +382,16 @@ function managerView(){
   const addForm=`<div class="formrow"><input id="nd-id" placeholder="מספר זיהוי" value="${esc(nd.id)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scanadd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
     <div class="formrow"><input id="nd-type" list="nd-types" placeholder="סוג מכשיר (למשל: מוניטור)" value="${esc(nd.type)}"><datalist id="nd-types">${types.map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist>
       <input id="nd-loc" placeholder="מיקום (לא חובה)" value="${esc(nd.loc)}"></div>
-    <div class="chkrow"><label><input type="checkbox" id="nd-vol"${nd.vol?' checked':''}> בצ׳קליסט בנות שירות</label><label><input type="checkbox" id="nd-clean"${nd.clean?' checked':''}> בצ׳קליסט מנקים</label></div>
     <div><button class="btn" data-act="adddev">הוספת מכשיר</button></div>`;
+  const rq=normId(st.rq),regDevs=S.devices.filter(x=>!rq||normId(x.id).includes(rq)||normId(x.type).includes(rq)||normId(x.location).includes(rq));
+  const regTypes=[...new Set(regDevs.map(x=>x.type))].sort((a,b)=>a.localeCompare(b,'he'));
+  const lists=x=>[x.vol?'בנות שירות':'',x.clean?'מנקים':''].filter(Boolean).join(' · ');
+  const registry=S.devices.length?`<div class="formrow"><input id="rq" placeholder="חיפוש לפי מספר, סוג או מיקום" value="${esc(st.rq)}"></div>
+    ${regTypes.length?`<div>${regTypes.map(t=>{const l=regDevs.filter(x=>x.type===t).sort((a,b)=>a.id.localeCompare(b.id));const rep=l.filter(x=>x.status==='repair').length;
+      return`<details class="dev"${rq?' open':''}><summary><span><b>${esc(t)}</b>${rep?` <span class="pill repair">${rep} בתיקון</span>`:''}</span><span class="cntbadge" style="background:var(--accent-soft);color:var(--accent)">${l.length}</span></summary>
+      <div class="list">${l.map(x=>`<div class="li"><div class="main"><span><span class="devid">${esc(x.id)}</span>${x.location?` <span class="muted">· ${esc(x.location)}</span>`:''}</span>${lists(x)?`<span class="muted" style="font-size:13px">בצ׳קליסט: ${lists(x)}</span>`:''}</div>
+        <span>${x.status==='repair'?'<span class="pill repair">בתיקון</span>':'<span class="pill done">פעיל</span>'} ${(S.repairHistory[x.id]||[]).length?`<span class="mono">${(S.repairHistory[x.id]||[]).length} תקלות</span>`:''}</span></div>`).join('')}</div></details>`}).join('')}</div>`:`<p class="empty">לא נמצא מכשיר שמתאים ל-"${esc(st.rq)}".</p>`}`:
+    '<p class="empty">המאגר עדיין ריק. מתחילים בסריקה של המכשיר הראשון.</p>';
   const lo=S.lastOrder,loLines=lo?lo.lines.filter(l=>l.order>0):[];
   const noBc=loLines.filter(l=>!l.barcode).length;
   const orderPanel=lo?`<p class="statusline">מולאה <b>${fmt(lo.at)}</b> ע"י ${esc(lo.by)} · ${loLines.length} פריטים להזמנה</p>
@@ -395,9 +403,12 @@ function managerView(){
   return`${banner}
   <section class="panel"><h2>סטטוס בדיקות</h2>${stats}</section>
   <section class="panel"><h2>להשלמה ולתיקון</h2>${issueList}</section>
+  <section class="panel" id="regsec"><h2>מאגר מכשירים</h2>
+    <p class="statusline">שלב ראשון: מכניסים למאגר את כל המכשירים. השיוך לצ׳קליסטים ייקבע בהמשך.</p>
+    <h3>הוספת מכשיר</h3>${addForm}
+    <h3>במאגר: ${S.devices.length} מכשירים · ${types.length} סוגים</h3>${registry}</section>
   <section class="panel"><h2>מכשור רפואי בתיקון</h2>${repList}<h3>שליחת מכשיר לתיקון</h3>${sendForm}</section>
   <section class="panel" id="histsec"><h2>היסטוריית תקלות</h2>${histPanel}</section>
-  <section class="panel"><h2>הוספת מכשיר</h2><p class="statusline">סורקים את הברקוד או מקלידים את המספר, ובוחרים סוג. המכשיר נכנס ללשונית "מכשור רפואי". ${S.devices.length} מכשירים ברשימה.</p>${addForm}</section>
   <section class="panel"><h2>הזמנה שבועית אחרונה</h2>${orderPanel}</section>
   <section class="panel"><h2>בדיקות אחרונות</h2>${recentList}</section>
   <section class="panel"><h2>עריכת הרשימות</h2>
@@ -416,6 +427,7 @@ document.getElementById('main').addEventListener('input',e=>{
   else if(t.id==='rdev'){st.rdev=t.value;const a=document.activeElement;if(a)a.blur();render()}
   else if(t.id==='rreason')st.rreason=t.value;
   else if(t.id==='hq'){st.hq=t.value;clearTimeout(window.__hqT);window.__hqT=setTimeout(()=>{const pos=t.selectionStart;render();const el=$('#hq');if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}},400)}
+  else if(t.id==='rq'){st.rq=t.value;clearTimeout(window.__rqT);window.__rqT=setTimeout(()=>{const pos=t.selectionStart;render();const el=$('#rq');if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}},400)}
   else if(t.dataset&&t.dataset.rn)st.rnote[t.dataset.rn]=t.value;
   else if(t.id&&t.id.startsWith('nd-')){const k=t.id.slice(3);st.nd[k]=t.type==='checkbox'?t.checked:t.value}
   else if(t.classList.contains('cnt'))cnt[view+'|'+selFreq[view]+'|'+t.dataset.id]=t.value;
@@ -461,7 +473,7 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='adddev'){
     const nd=st.nd;if(!nd.id.trim()){toast('יש להזין או לסרוק מספר זיהוי','err');return}if(!nd.type.trim()){toast('יש לבחור סוג מכשיר','err');return}
     b.disabled=true;try{apply(await api('addDevice',mgrPin,{id:nd.id,type:nd.type,location:nd.loc,vol:nd.vol,clean:nd.clean}));
-      toast(`${nd.type} ${nd.id} נוסף`);st.nd={id:'',type:nd.type,loc:nd.loc,vol:nd.vol,clean:nd.clean};render()}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
+      toast(`${nd.type} ${nd.id} נוסף למאגר`);st.nd={id:'',type:nd.type,loc:nd.loc,vol:nd.vol,clean:nd.clean};render()}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='send'){
     const id=st.rdev||($('#rdev')&&$('#rdev').value);if(!id){toast('יש לבחור מכשיר','err');return}
     if(!st.rreason.trim()){toast('יש לכתוב מה התקלה','err');const el=$('#rreason');if(el)el.focus();return}
