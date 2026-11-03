@@ -377,7 +377,7 @@ function catalogView(){
     .sort((a,b)=>a.name.localeCompare(b.name,'he'));
   const fact=(l,v,cls)=>v?`<dt>${l}</dt><dd${cls?` class="${cls}"`:''}>${esc(v)}</dd>`:'';
   const cards=list.map(c=>`<details class="item" data-pid="${esc(c.id)}"${st.copen===c.id||(raw&&list.length===1)?' open':''}><summary><span class="nm">${esc(c.name)}</span><span class="src${c.source?'':' none'}">${esc(c.source||'לא צוין מקור')}</span></summary>
-    <dl class="facts">${fact('מאיפה מביאים',c.source,'where')}${fact('איך מזמינים',c.howto)}${fact('תיאור',c.desc)}${fact('מק״ט',c.sku)}${fact('ברקוד',c.barcode)}${fact('יחידת מידה',c.unit)}${fact('מיקום בחדר',c.location)}${fact('הערות',c.notes)}</dl>
+    <dl class="facts">${fact('מאיפה מביאים',c.source,'where')}${fact('איך מזמינים',c.howto)}${fact('תיאור',c.desc)}${fact('מק״ט',c.sku)}${fact('ברקוד',c.barcode)}${fact('יחידת מידה',c.unit)}${fact('מיקום במלר״ד',c.location)}${fact('הערות',c.notes)}</dl>
     ${c.barcode?`<div class="bcbox"><svg data-bc="${esc(c.barcode)}"></svg></div>`:''}</details>`).join('');
   const ni=st.ni;
   const addForm=S.isMgr?`<section class="panel"><h2>הוספת פריט לקטלוג</h2><p class="statusline">שדות נוספים, כמו הערות ותיקונים, עורכים בלשונית "קטלוג פריטים" בגיליון.</p>
@@ -385,7 +385,7 @@ function catalogView(){
     <div class="formrow"><input id="ni-barcode" placeholder="ברקוד" value="${esc(ni.barcode)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scancatadd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
     <div class="formrow"><input id="ni-sku" placeholder="מק״ט" value="${esc(ni.sku)}" style="direction:ltr;text-align:right"><input id="ni-unit" placeholder="יחידת מידה (קופסה, יח׳…)" value="${esc(ni.unit)}"></div>
     <div class="formrow"><input id="ni-source" list="ni-srcs" placeholder="מאיפה מביאים" value="${esc(ni.source)}"><datalist id="ni-srcs">${srcs.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist>
-      <input id="ni-location" placeholder="מיקום בחדר הטראומה" value="${esc(ni.location)}"></div>
+      <input id="ni-location" placeholder="איפה נמצא במלר״ד" value="${esc(ni.location)}"></div>
     <div class="formcol"><textarea id="ni-desc" placeholder="תיאור הפריט">${esc(ni.desc)}</textarea><textarea id="ni-howto" placeholder="איך מזמינים / איש קשר / טלפון">${esc(ni.howto)}</textarea></div>
     <div><button class="btn" data-act="addcat">הוספה לקטלוג</button></div></section>`:'';
   return`<section class="panel"><h2>קטלוג פריטים</h2>
