@@ -30,7 +30,7 @@ const REPAIR_HEADERS = ['מספר זיהוי', 'סוג מכשיר', 'תאריך 
 const CONS_HEADERS = ['מזהה', 'פריט', 'קטגוריה', 'יחידת מידה', 'כמות תקן', 'ברקוד / מק״ט'];
 const ORDER_HEADERS = ['מזהה הזמנה', 'תאריך', 'בת שירות', 'פריט', 'קטגוריה', 'יחידה', 'תקן', 'מלאי קיים', 'להזמנה', 'ברקוד / מק״ט'];
 // The מק״ט is also the barcode on the sticker (one field).
-const CAT_HEADERS = ['מזהה', 'שם פריט', 'תיאור', 'מק״ט (ברקוד)', 'יחידת מידה', 'מאיפה מביאים', 'איך מזמינים / איש קשר', 'מיקום במלר״ד', 'הערות', 'כמות תקן'];
+const CAT_HEADERS = ['מזהה', 'שם פריט', 'תיאור פריט מחסן', 'מק״ט (ברקוד)', 'יחידת מידה', 'מאיפה מביאים', 'איך מזמינים / איש קשר', 'מיקום במלר״ד', 'הערות', 'כמות תקן'];
 const ISSUE_HEADERS = ['מזהה', 'תאריך דיווח', 'פריט', 'ארון / מיקום', 'סוג', 'כמות תקן', 'נמצאו בפועל', 'להשלים',
   'דווח ע"י', 'צוות', 'הערה', 'סטטוס', 'תאריך טיפול', 'מזהה פריט'];
 
@@ -413,7 +413,7 @@ function catRow_(id, it) {
   if (!name) throw new Error('חסר שם פריט.');
   const code = t(it.sku || it.barcode, 60).replace(/\s+/g, '');
   const q = num_(it.qty);
-  return [id, name, t(it.desc, 1000), code, t(it.unit, 40), t(it.source, 120), t(it.howto, 500), t(it.location, 120), t(it.notes, 1000), q === null ? '' : q];
+  return [id, name, t(it.desc, 300), code, t(it.unit, 40), t(it.source, 120), t(it.howto, 500), t(it.location, 120), t(it.notes, 1000), q === null ? '' : q];
 }
 
 function catDup_(cat, row, exceptId) {
