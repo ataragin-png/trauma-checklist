@@ -35,7 +35,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .brand h1{font-family:var(--f-display);font-weight:400;font-size:22px;margin:0;line-height:1.2}
 .brand .unit{color:var(--muted);font-size:13px}
 nav.tabs{display:flex;gap:4px}
-nav.tabs button{flex:1;background:none;border:0;border-bottom:3px solid transparent;padding:8px 6px 10px;font-weight:600;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+nav.tabs button{flex:1 1 auto;white-space:nowrap;font-size:14px;padding-inline:4px;min-width:0;background:none;border:0;border-bottom:3px solid transparent;padding:8px 6px 10px;font-weight:600;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
 nav.tabs button[aria-current="page"]{color:var(--ink);border-bottom-color:var(--accent)}
 .badge{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--crit);color:#fff;font-size:12px;display:inline-flex;align-items:center;justify-content:center;font-family:var(--f-mono)}
 main .wrap{padding-block:18px 120px;display:flex;flex-direction:column;gap:18px}
@@ -188,7 +188,8 @@ dl.facts dd.where{font-weight:700;color:var(--accent)}
   <nav class="tabs" id="tabs">
     <button data-view="nurses">אחיות</button>
     <button data-view="volunteers">בנות שירות</button>
-    <button data-view="catalog">פריטים</button>
+    <button data-view="consumables">מתכלים</button>
+    <button data-view="devices">מכשור</button>
     <button data-view="manager">מנהל <span class="badge" id="badge" hidden>0</span></button>
   </nav>
 </div></header>
@@ -215,7 +216,8 @@ const TZ='Asia/Jerusalem';
 const store={get(k){try{return localStorage.getItem(k)||''}catch(e){return''}},set(k,v){try{v?localStorage.setItem(k,v):localStorage.removeItem(k)}catch(e){}}};
 
 const S={loaded:false,error:'',items:[],last:{},openIssues:[],recent:[],isMgr:false,sheetUrl:'',unit:'',devices:[],devTypes:{},consumables:[],repairs:[],lastOrder:null,repairHistory:{},catalog:[]};
-let view=['nurses','volunteers','catalog','manager'].includes(store.get('view'))?store.get('view'):'nurses';
+const VIEWS=['nurses','volunteers','consumables','devices','manager'];
+let view=store.get('view')==='catalog'?'consumables':(VIEWS.includes(store.get('view'))?store.get('view'):'nurses');
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
@@ -286,10 +288,11 @@ function render(){
   const main=$('#main');
   if(S.error&&!S.loaded){main.innerHTML=`<div class="panel"><h2>לא הצלחתי לטעון את הנתונים</h2><p class="empty">${esc(S.error)}</p><div><button class="btn" data-act="reload">ניסיון נוסף</button></div></div>`;$('#submitbar').hidden=true;return}
   if(!S.loaded){$('#submitbar').hidden=true;return}
-  main.innerHTML=view==='manager'?managerView():view==='catalog'?catalogView():checkView(view);
-  $('#submitbar').hidden=view==='manager'||view==='catalog'||!selFreq[view];
-  if(view!=='manager'&&view!=='catalog')updateProgress();
-  if(view==='catalog')drawCatBarcodes();
+  const isCheck=view==='nurses'||view==='volunteers';
+  main.innerHTML=view==='manager'?managerView():view==='consumables'?managerView('consumables'):view==='devices'?managerView('devices'):checkView(view);
+  $('#submitbar').hidden=!isCheck||!selFreq[view];
+  if(isCheck)updateProgress();
+  if(view==='consumables')drawCatBarcodes();
 }
 
 function checkView(team){
@@ -400,8 +403,8 @@ function drawCatBarcodes(){
 }
 document.addEventListener('toggle',e=>{const d=e.target;if(d.matches&&d.matches('details.item')){if(d.open){st.copen=d.dataset.pid;drawCatBarcodes()}else if(st.copen===d.dataset.pid)st.copen=''}},true);
 
-function managerView(){
-  if(!S.isMgr)return`<section class="panel"><h2>כניסת מנהל</h2>
+function managerView(part){
+  if(!part&&!S.isMgr)return`<section class="panel"><h2>כניסת מנהל</h2>
     <p class="statusline">לוח הבקרה מציג חוסרים, תקלות ובדיקות שלא בוצעו. הקוד נמצא בגיליון "הגדרות".</p>
     <div class="pinrow"><label for="mpin" class="muted">קוד מנהל</label><input id="mpin" type="password" inputmode="numeric" autocomplete="off" value="${esc(st.mgrDraft)}"><button class="btn" data-act="login">כניסה</button></div></section>`;
   const open=S.openIssues,cs=combos(),late=cs.filter(([t,f])=>due(t,f).state!=='done');
@@ -458,17 +461,28 @@ function managerView(){
     '<p class="empty">עוד לא מולאה הזמנה שבועית.</p>';
   const recentList=S.recent.length?`<div class="list">${S.recent.map(c=>`<div class="li"><div class="main"><span><b>${TEAM[c.team]}</b> · ${FREQ[c.freq]?FREQ[c.freq].label:''} · ${esc(c.by)}</span>${c.notes?`<span class="muted">"${esc(c.notes)}"</span>`:''}</div>
       <span class="mono">${fmt(c.at)} · ${c.problemCount?`<span style="color:var(--crit)">${c.problemCount} בעיות</span>`:'תקין'}</span></div>`).join('')}</div>`:'<p class="empty">עוד לא נשמרו בדיקות. בדיקה ראשונה תופיע כאן ברגע שתישמר.</p>';
+  const mgrHint=what=>`<section class="panel"><p class="statusline">${what} זמינים במצב מנהל. נכנסים בלשונית "מנהל".</p></section>`;
+  if(part==='devices'){
+    const inRep=S.devices.filter(x=>x.status==='repair');
+    return`<section class="panel" id="regsec"><h2>מאגר מכשירים</h2>
+      <p class="statusline">כל המכשור הרפואי בחדר הטראומה, לפי סוג. השיוך לצ׳קליסטים ייקבע בהמשך.</p>
+      ${S.isMgr?`<h3>הוספת מכשיר</h3>${addForm}`:''}
+      <h3>במאגר: ${S.devices.length} מכשירים · ${types.length} סוגים</h3>${registry}</section>
+    ${S.isMgr?`<section class="panel"><h2>מכשור רפואי בתיקון</h2>${repList}<h3>שליחת מכשיר לתיקון</h3>${sendForm}</section>
+    <section class="panel" id="histsec"><h2>היסטוריית תקלות</h2>${histPanel}</section>`:
+      `<section class="panel"><h2>מכשירים בתיקון</h2>${inRep.length?`<div class="list">${inRep.map(x=>`<div class="li"><div class="main"><span><b>${esc(x.type)}</b> <span class="devid">${esc(x.id)}</span></span></div><span class="pill repair">בתיקון</span></div>`).join('')}</div>`:'<p class="empty">אין כרגע מכשירים בתיקון.</p>'}</section>${mgrHint('הוספת מכשירים, שליחה לתיקון והיסטוריית תקלות')}`}`;
+  }
+  if(part==='consumables'){
+    return`<section class="panel"><h2>ציוד מתכלה</h2><p class="statusline">קטלוג הפריטים, ובמצב מנהל גם ההזמנה השבועית האחרונה והדפסה עם ברקודים.</p></section>
+    ${S.isMgr?`<section class="panel"><h2>הזמנה שבועית אחרונה</h2>${orderPanel}</section>`:''}
+    ${catalogView()}`;
+  }
   return`${banner}
   <section class="panel"><h2>סטטוס בדיקות</h2>${stats}</section>
   <section class="panel"><h2>להשלמה ולתיקון</h2>${issueList}</section>
-  <section class="panel" id="regsec"><h2>מאגר מכשירים</h2>
-    <p class="statusline">שלב ראשון: מכניסים למאגר את כל המכשירים. השיוך לצ׳קליסטים ייקבע בהמשך.</p>
-    <h3>הוספת מכשיר</h3>${addForm}
-    <h3>במאגר: ${S.devices.length} מכשירים · ${types.length} סוגים</h3>${registry}</section>
-  <section class="panel"><h2>מכשור רפואי בתיקון</h2>${repList}<h3>שליחת מכשיר לתיקון</h3>${sendForm}</section>
-  <section class="panel" id="histsec"><h2>היסטוריית תקלות</h2>${histPanel}</section>
-  <section class="panel"><h2>הזמנה שבועית אחרונה</h2>${orderPanel}</section>
   <section class="panel"><h2>בדיקות אחרונות</h2>${recentList}</section>
+  <section class="panel"><h2>מכשור ומתכלים</h2><p class="statusline">מאגר המכשירים, התיקונים וההיסטוריה נמצאים בלשונית "מכשור". הקטלוג, ההזמנה השבועית וההדפסה נמצאים בלשונית "מתכלים".</p>
+    <div class="actions"><button class="btn ghost" data-act="goview" data-v="devices">למכשור</button><button class="btn ghost" data-act="goview" data-v="consumables">למתכלים</button></div></section>
   <section class="panel"><h2>עריכת הרשימות</h2>
     <p class="statusline">הכל נערך בגיליון: "מכשור רפואי" (מכשיר בכל שורה, עם מספר הנדסה רפואית), "תקן מכשירים" (כמות תקן לכל סוג), "מתכלים" (פריטים להזמנה השבועית) ו"ציוד" (שאר הצ׳קליסטים). השינוי מופיע כאן אחרי רענון.</p>
     <div class="actions">${S.sheetUrl?`<a class="btn ghost" href="${esc(S.sheetUrl)}" target="_blank" rel="noopener">פתיחת הגיליון</a>`:''}<button class="btn ghost" data-act="reload">רענון</button><button class="linkbtn" data-act="logout">יציאה ממצב מנהל</button></div>
@@ -526,7 +540,8 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='login'){login();return}
   if(act==='logout'){mgrPin='';store.set('mgrPin','');S.isMgr=false;S.openIssues=[];render();return}
   if(act==='printorder'){printOrder(S.lastOrder);return}
-  if(act==='info'){view='catalog';store.set('view',view);st.cq='';st.csrc='';st.copen=b.dataset.pid;render();const el=document.querySelector(`details.item[data-pid="${CSS.escape(b.dataset.pid)}"]`);if(el)el.scrollIntoView({block:'center'});return}
+  if(act==='goview'){view=b.dataset.v;store.set('view',view);render();window.scrollTo(0,0);return}
+  if(act==='info'){view='consumables';store.set('view',view);st.cq='';st.csrc='';st.copen=b.dataset.pid;render();const el=document.querySelector(`details.item[data-pid="${CSS.escape(b.dataset.pid)}"]`);if(el)el.scrollIntoView({block:'center'});return}
   if(act==='csrc'){st.csrc=b.dataset.v;render();return}
   if(act==='scancat'){openScanner('catlookup');return}
   if(act==='scancatadd'){openScanner('catadd');return}
