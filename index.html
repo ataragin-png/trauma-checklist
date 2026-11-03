@@ -221,7 +221,7 @@ let view=store.get('view')==='catalog'?'consumables':(VIEWS.includes(store.get('
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
-const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:false,clean:false},rq:'',cq:'',csrc:'',copen:'',ni:{name:'',sku:'',barcode:'',unit:'',source:'',desc:'',howto:'',location:''}};
+const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:false,clean:false},rq:'',cq:'',csrc:'',copen:'',ni:{name:'',sku:'',unit:'',qty:'',source:'',desc:'',howto:'',location:''},cedit:'',ce:{}};
 let busy=false,pending=false;
 
 const $=s=>document.querySelector(s);
@@ -229,7 +229,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const dayKey=d=>new Date(d).toLocaleDateString('en-CA',{timeZone:TZ});
 const fmt=iso=>new Date(iso).toLocaleString('he-IL',{timeZone:TZ,weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 const API_URL=(window.TRAUMA_CONFIG&&window.TRAUMA_CONFIG.apiUrl)||'';
-const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,submitDeviceCheck:null,submitOrder:null,resolveIssue:['mgrPin','id'],addDevice:['mgrPin','device'],addCatalogItem:['mgrPin','item'],sendToRepair:['mgrPin','deviceId','reason'],returnFromRepair:['mgrPin','deviceId','note']};
+const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,submitDeviceCheck:null,submitOrder:null,resolveIssue:['mgrPin','id'],addDevice:['mgrPin','device'],addCatalogItem:['mgrPin','item'],updateCatalogItem:['mgrPin','id','item'],sendToRepair:['mgrPin','deviceId','reason'],returnFromRepair:['mgrPin','deviceId','note']};
 async function api(fn,...args){
   if(!API_URL)throw new Error('האתר עדיין לא מחובר לגיליון הנתונים.');
   const body=ARGS[fn]?Object.fromEntries(ARGS[fn].map((k,i)=>[k,args[i]])):Object.assign({},args[0]);
@@ -376,25 +376,28 @@ function catalogView(){
   const list=S.catalog.filter(c=>(!st.csrc||(st.csrc==='—'?!c.source:c.source===st.csrc))&&(!raw||c.name.includes(raw)||c.desc.includes(raw)||(q&&(normId(c.sku).includes(q)||normId(c.barcode).includes(q)))))
     .sort((a,b)=>a.name.localeCompare(b.name,'he'));
   const fact=(l,v,cls)=>v?`<dt>${l}</dt><dd${cls?` class="${cls}"`:''}>${esc(v)}</dd>`:'';
-  const cards=list.map(c=>`<details class="item" data-pid="${esc(c.id)}"${st.copen===c.id||(raw&&list.length===1)?' open':''}><summary><span class="nm">${esc(c.name)}</span><span class="src${c.source?'':' none'}">${esc(c.source||'לא צוין מקור')}</span></summary>
-    <dl class="facts">${fact('מאיפה מביאים',c.source,'where')}${fact('איך מזמינים',c.howto)}${fact('תיאור',c.desc)}${fact('מק״ט',c.sku)}${fact('ברקוד',c.barcode)}${fact('יחידת מידה',c.unit)}${fact('מיקום במלר״ד',c.location)}${fact('הערות',c.notes)}</dl>
-    ${c.barcode?`<div class="bcbox"><svg data-bc="${esc(c.barcode)}"></svg></div>`:''}</details>`).join('');
+  const srcList=`<datalist id="ni-srcs">${srcs.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist>`;
+  const itemFields=(pre,o)=>`<div class="formrow"><input id="${pre}-name" placeholder="שם הפריט" value="${esc(o.name)}"></div>
+    <div class="formrow"><input id="${pre}-sku" placeholder="מק״ט (ברקוד)" value="${esc(o.sku)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scan${pre}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
+    <div class="formrow"><input id="${pre}-qty" type="number" min="0" inputmode="numeric" placeholder="כמות תקן" value="${esc(o.qty)}"><input id="${pre}-unit" placeholder="יחידת מידה (קופסה, יח׳…)" value="${esc(o.unit)}"></div>
+    <div class="formrow"><input id="${pre}-source" list="ni-srcs" placeholder="מאיפה מביאים" value="${esc(o.source)}"><input id="${pre}-location" placeholder="איפה נמצא במלר״ד" value="${esc(o.location)}"></div>
+    <div class="formcol"><textarea id="${pre}-desc" placeholder="תיאור הפריט">${esc(o.desc)}</textarea><textarea id="${pre}-howto" placeholder="איך מזמינים / איש קשר / טלפון">${esc(o.howto)}</textarea>${pre==='ce'?`<textarea id="ce-notes" placeholder="הערות">${esc(o.notes)}</textarea>`:''}</div>`;
+  const cards=list.map(c=>`<details class="item" data-pid="${esc(c.id)}"${st.copen===c.id||st.cedit===c.id||(raw&&list.length===1)?' open':''}><summary><span class="nm">${esc(c.name)}</span><span class="src${c.source?'':' none'}">${esc(c.source||'לא צוין מקור')}</span></summary>
+    ${st.cedit===c.id?`<div class="formcol" style="margin-top:12px">${itemFields('ce',st.ce)}<div class="actions"><button class="btn" data-act="catsave" data-pid="${esc(c.id)}">שמירה</button><button class="btn ghost" data-act="catcancel">ביטול</button></div></div>`:
+    `<dl class="facts">${fact('מאיפה מביאים',c.source,'where')}${fact('איך מזמינים',c.howto)}${fact('תיאור',c.desc)}${fact('מק״ט',c.sku)}${fact('כמות תקן',c.qty==null?'':String(c.qty))}${fact('יחידת מידה',c.unit)}${fact('מיקום במלר״ד',c.location)}${fact('הערות',c.notes)}</dl>
+    ${c.sku?`<div class="bcbox"><svg data-bc="${esc(c.sku)}"></svg></div>`:''}
+    ${S.isMgr?`<div class="actions" style="margin-top:10px"><button class="btn ghost small" data-act="catedit" data-pid="${esc(c.id)}">עריכה</button></div>`:''}`}</details>`).join('');
   const ni=st.ni;
-  const addForm=S.isMgr?`<section class="panel"><h2>הוספת פריט לקטלוג</h2><p class="statusline">שדות נוספים, כמו הערות ותיקונים, עורכים בלשונית "קטלוג פריטים" בגיליון.</p>
-    <div class="formrow"><input id="ni-name" placeholder="שם הפריט" value="${esc(ni.name)}"></div>
-    <div class="formrow"><input id="ni-barcode" placeholder="ברקוד" value="${esc(ni.barcode)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scancatadd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
-    <div class="formrow"><input id="ni-sku" placeholder="מק״ט" value="${esc(ni.sku)}" style="direction:ltr;text-align:right"><input id="ni-unit" placeholder="יחידת מידה (קופסה, יח׳…)" value="${esc(ni.unit)}"></div>
-    <div class="formrow"><input id="ni-source" list="ni-srcs" placeholder="מאיפה מביאים" value="${esc(ni.source)}"><datalist id="ni-srcs">${srcs.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist>
-      <input id="ni-location" placeholder="איפה נמצא במלר״ד" value="${esc(ni.location)}"></div>
-    <div class="formcol"><textarea id="ni-desc" placeholder="תיאור הפריט">${esc(ni.desc)}</textarea><textarea id="ni-howto" placeholder="איך מזמינים / איש קשר / טלפון">${esc(ni.howto)}</textarea></div>
+  const addForm=S.isMgr?`<section class="panel"><h2>הוספת פריט לקטלוג</h2><p class="statusline">אפשר לערוך כל פריט אחר כך בכפתור "עריכה" שבכרטיס שלו.</p>
+    <div class="formcol">${itemFields('ni',ni)}</div>
     <div><button class="btn" data-act="addcat">הוספה לקטלוג</button></div></section>`:'';
   return`<section class="panel"><h2>קטלוג פריטים</h2>
     <p class="statusline">כל הפריטים, ולכל אחד מאיפה מביאים אותו. לוחצים על פריט כדי לראות את כל הפרטים.</p>
-    <div class="formrow"><input id="cq" placeholder="חיפוש לפי שם, מק״ט או ברקוד" value="${esc(st.cq)}"><button class="btn ghost scan" data-act="scancat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
+    <div class="formrow"><input id="cq" placeholder="חיפוש לפי שם או מק״ט" value="${esc(st.cq)}"><button class="btn ghost scan" data-act="scancat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
     ${srcs.length?`<div class="chips" role="group" aria-label="סינון לפי מקור"><button data-act="csrc" data-v="" aria-pressed="${!st.csrc}">הכל</button>${srcs.map(x=>`<button data-act="csrc" data-v="${esc(x)}" aria-pressed="${st.csrc===x}">${esc(x)}</button>`).join('')}${S.catalog.some(c=>!c.source)?`<button data-act="csrc" data-v="—" aria-pressed="${st.csrc==='—'}">בלי מקור</button>`:''}</div>`:''}
     <p class="statusline"><b>${list.length}</b> מתוך ${S.catalog.length} פריטים</p></section>
   ${S.catalog.length?(list.length?`<div class="catlist">${cards}</div>`:`<p class="empty">לא נמצא פריט שמתאים לחיפוש.</p>`):`<div class="panel"><p class="empty">הקטלוג עדיין ריק. ${S.isMgr?'מוסיפים פריטים בטופס למטה או ישירות בגיליון, בלשונית "קטלוג פריטים".':'המנהל מוסיף פריטים בגיליון.'}</p></div>`}
-  ${addForm}`;
+  ${srcList}${addForm}`;
 }
 function drawCatBarcodes(){
   const open=[...document.querySelectorAll('details.item[open] svg[data-bc]')];if(!open.length)return;
@@ -503,6 +506,7 @@ document.getElementById('main').addEventListener('input',e=>{
   else if(t.dataset&&t.dataset.rn)st.rnote[t.dataset.rn]=t.value;
   else if(t.id==='cq'){st.cq=t.value;clearTimeout(window.__cqT);window.__cqT=setTimeout(()=>{const pos=t.selectionStart;render();const el=$('#cq');if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}},350)}
   else if(t.id&&t.id.startsWith('ni-'))st.ni[t.id.slice(3)]=t.value;
+  else if(t.id&&t.id.startsWith('ce-'))st.ce[t.id.slice(3)]=t.value;
   else if(t.id&&t.id.startsWith('nd-')){const k=t.id.slice(3);st.nd[k]=t.type==='checkbox'?t.checked:t.value}
   else if(t.classList.contains('cnt'))cnt[view+'|'+selFreq[view]+'|'+t.dataset.id]=t.value;
   else if(t.classList.contains('stock')){
@@ -544,10 +548,16 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='info'){view='consumables';store.set('view',view);st.cq='';st.csrc='';st.copen=b.dataset.pid;render();const el=document.querySelector(`details.item[data-pid="${CSS.escape(b.dataset.pid)}"]`);if(el)el.scrollIntoView({block:'center'});return}
   if(act==='csrc'){st.csrc=b.dataset.v;render();return}
   if(act==='scancat'){openScanner('catlookup');return}
-  if(act==='scancatadd'){openScanner('catadd');return}
+  if(act==='scanni'){openScanner('catadd');return}
+  if(act==='scance'){openScanner('catedit');return}
+  if(act==='catedit'){const c=S.catalog.find(x=>x.id===b.dataset.pid);if(!c)return;st.cedit=c.id;st.copen=c.id;st.ce={name:c.name,sku:c.sku,qty:c.qty==null?'':String(c.qty),unit:c.unit,source:c.source,location:c.location,desc:c.desc,howto:c.howto,notes:c.notes};render();const el=$('#ce-name');if(el)el.focus();return}
+  if(act==='catcancel'){st.cedit='';render();return}
+  if(act==='catsave'){
+    if(!(st.ce.name||'').trim()){toast('יש להזין שם פריט','err');return}
+    b.disabled=true;try{apply(await api('updateCatalogItem',mgrPin,b.dataset.pid,Object.assign({},st.ce)));st.cedit='';render();toast('הפריט עודכן')}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='addcat'){
     if(!st.ni.name.trim()){toast('יש להזין שם פריט','err');return}
-    b.disabled=true;try{apply(await api('addCatalogItem',mgrPin,Object.assign({},st.ni)));toast(`${st.ni.name} נוסף לקטלוג`);st.ni={name:'',sku:'',barcode:'',unit:st.ni.unit,source:st.ni.source,desc:'',howto:st.ni.howto,location:''};render()}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
+    b.disabled=true;try{apply(await api('addCatalogItem',mgrPin,Object.assign({},st.ni)));toast(`${st.ni.name} נוסף לקטלוג`);st.ni={name:'',sku:'',qty:'',unit:st.ni.unit,source:st.ni.source,desc:'',howto:st.ni.howto,location:st.ni.location};render()}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='scan'){openScanner('check');return}
   if(act==='scanadd'){openScanner('add');return}
   if(act==='scanlookup'){openScanner('lookup');return}
@@ -653,7 +663,7 @@ function scanCount(){
 async function openScanner(mode){
   scanMode=mode;lastCode='';
   $('#scanov').hidden=false;$('#scanmanual').value='';
-  $('#scantitle').textContent={add:'סריקת מכשיר חדש',lookup:'חיפוש מכשיר',repair:'מכשיר לתיקון',catlookup:'חיפוש פריט',catadd:'ברקוד של פריט חדש'}[mode]||'סריקת מכשירים';
+  $('#scantitle').textContent={add:'סריקת מכשיר חדש',lookup:'חיפוש מכשיר',repair:'מכשיר לתיקון',catlookup:'חיפוש פריט',catadd:'מק״ט של פריט חדש',catedit:'מק״ט לפריט'}[mode]||'סריקת מכשירים';
   scanMsg('מכוונים את המצלמה לברקוד שעל המדבקה.');scanCount();
   try{
     await loadLib();
@@ -682,7 +692,8 @@ function onCode(text){
 function handleCode(code,raw){
   const dev=S.devices.find(x=>normId(x.id)===code);
   if(scanMode==='catlookup'){const c=catFind({barcode:raw});st.cq=c?'':raw;st.csrc='';st.copen=c?c.id:'';closeScanner().then(()=>{render();if(c){const el=document.querySelector(`details.item[data-pid="${CSS.escape(c.id)}"]`);if(el)el.scrollIntoView({block:'center'})}else toast('לא נמצא פריט עם הברקוד '+raw,'err')});return}
-  if(scanMode==='catadd'){const c=catFind({barcode:raw});if(c){scanMsg('הפריט כבר בקטלוג: '+c.name,'warn');return}st.ni.barcode=raw.replace(/\s+/g,'');closeScanner().then(()=>{render();const el=$('#ni-name');if(el)el.focus()});return}
+  if(scanMode==='catadd'){const c=catFind({barcode:raw});if(c){scanMsg('הפריט כבר בקטלוג: '+c.name,'warn');return}st.ni.sku=raw.replace(/\s+/g,'');closeScanner().then(()=>{render();const el=$('#ni-name');if(el)el.focus()});return}
+  if(scanMode==='catedit'){st.ce.sku=raw.replace(/\s+/g,'');closeScanner().then(()=>render());return}
   if(scanMode==='lookup'){st.hq=dev?dev.id:raw;closeScanner().then(()=>{render();const el=$('#histsec');if(el)el.scrollIntoView({block:'start'})});return}
   if(scanMode==='repair'){
     if(!dev){scanMsg('ברקוד לא מוכר: '+raw+'. המכשיר לא נמצא ברשימה.','bad');return}

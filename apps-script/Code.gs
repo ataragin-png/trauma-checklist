@@ -29,7 +29,8 @@ const DEVTYPE_HEADERS = ['סוג מכשיר', 'כמות תקן'];
 const REPAIR_HEADERS = ['מספר זיהוי', 'סוג מכשיר', 'תאריך שליחה', 'תקלה / סיבה', 'תאריך חזרה', 'הערת חזרה', 'סטטוס'];
 const CONS_HEADERS = ['מזהה', 'פריט', 'קטגוריה', 'יחידת מידה', 'כמות תקן', 'ברקוד / מק״ט'];
 const ORDER_HEADERS = ['מזהה הזמנה', 'תאריך', 'בת שירות', 'פריט', 'קטגוריה', 'יחידה', 'תקן', 'מלאי קיים', 'להזמנה', 'ברקוד / מק״ט'];
-const CAT_HEADERS = ['מזהה', 'שם פריט', 'תיאור', 'מק״ט', 'ברקוד', 'יחידת מידה', 'מאיפה מביאים', 'איך מזמינים / איש קשר', 'מיקום במלר״ד', 'הערות'];
+// The מק״ט is also the barcode on the sticker (one field).
+const CAT_HEADERS = ['מזהה', 'שם פריט', 'תיאור', 'מק״ט (ברקוד)', 'יחידת מידה', 'מאיפה מביאים', 'איך מזמינים / איש קשר', 'מיקום במלר״ד', 'הערות', 'כמות תקן'];
 const ISSUE_HEADERS = ['מזהה', 'תאריך דיווח', 'פריט', 'ארון / מיקום', 'סוג', 'כמות תקן', 'נמצאו בפועל', 'להשלים',
   'דווח ע"י', 'צוות', 'הערה', 'סטטוס', 'תאריך טיפול', 'מזהה פריט'];
 
@@ -104,6 +105,7 @@ function handle_(p) {
       case 'returnFromRepair': data = returnFromRepair(p.mgrPin, p.deviceId, p.note); break;
       case 'addDevice': data = addDevice(p.mgrPin, p.device); break;
       case 'addCatalogItem': data = addCatalogItem(p.mgrPin, p.item); break;
+      case 'updateCatalogItem': data = updateCatalogItem(p.mgrPin, p.id, p.item); break;
       default: throw new Error('פעולה לא מוכרת.');
     }
     return json_({ ok: true, data: data });
@@ -331,13 +333,15 @@ function setupV2() {
   cons.getRange(2, 6, N, 1).setNumberFormat('@');
   cons.getRange('F1').setNote('הברקוד או המק״ט כפי שהוא נסרק במערכת ההזמנות של בית החולים. נשמר כטקסט כדי לא לאבד אפסים בהתחלה.');
 
+  migrateCatalog_();
   const cat = sheet_(SH.catalog, CAT_HEADERS);
-  cat.getRange(2, 4, N * 2, 2).setNumberFormat('@');
+  cat.getRange(2, 4, N * 2, 1).setNumberFormat('@');
   cat.getRange('A1').setNote('מזהה פנימי. נוצר אוטומטית, אין צורך למלא.');
-  cat.getRange('G1').setNote('מאיפה מביאים את הפריט: למשל מחסן מרכזי, בית מרקחת, מחסן סטרילי, הנדסה רפואית, ספק.');
+  cat.getRange('F1').setNote('מאיפה מביאים את הפריט: למשל מחסן מרכזי, בית מרקחת, מחסן סטרילי, הנדסה רפואית, ספק.');
   cat.getRange('A2:A').setFontColor('#8a969c');
-  cat.setColumnWidth(1, 80).setColumnWidth(2, 220).setColumnWidth(3, 280).setColumnWidth(4, 110).setColumnWidth(5, 150)
-    .setColumnWidth(6, 90).setColumnWidth(7, 160).setColumnWidth(8, 220).setColumnWidth(9, 170).setColumnWidth(10, 220);
+  cat.setColumnWidth(1, 80).setColumnWidth(2, 220).setColumnWidth(3, 280).setColumnWidth(4, 150).setColumnWidth(5, 90)
+    .setColumnWidth(6, 160).setColumnWidth(7, 220).setColumnWidth(8, 170).setColumnWidth(9, 220).setColumnWidth(10, 90);
+  cat.getRange(2, 10, N * 2, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(false).build());
   cat.getRange(2, 1, N * 2, CAT_HEADERS.length).setWrap(true).setVerticalAlignment('top');
 
   const ord = sheet_(SH.orders, ORDER_HEADERS);
@@ -375,7 +379,21 @@ function readConsumables_() {
   }).filter(Boolean);
 }
 
+/** Old layout had separate מק״ט and ברקוד columns (D, E). Merge into one column, keeping whichever is filled. */
+function migrateCatalog_() {
+  const sh = ss_().getSheetByName(SH.catalog);
+  if (!sh || String(sh.getRange('E1').getValue()).trim() !== 'ברקוד') return;
+  const last = sh.getLastRow();
+  if (last >= 2) {
+    const v = sh.getRange(2, 4, last - 1, 2).getDisplayValues();
+    sh.getRange(2, 4, last - 1, 1).setNumberFormat('@').setValues(v.map(r => [String(r[1]).trim() || String(r[0]).trim()]));
+  }
+  sh.deleteColumn(5);
+  sh.getRange(1, 1, 1, CAT_HEADERS.length).setValues([CAT_HEADERS]);
+}
+
 function readCatalog_() {
+  migrateCatalog_();
   const sh = ss_().getSheetByName(SH.catalog);
   const txt = v => (v === undefined || v === null ? '' : String(v).trim());
   return readRows_(SH.catalog, 3000).map(o => {
@@ -383,27 +401,60 @@ function readCatalog_() {
     if (!name) return null;
     let id = txt(r[0]);
     if (!id) { id = 'p' + Utilities.getUuid().slice(0, 8); sh.getRange(o.row, 1).setValue(id); }
-    return { id: id, name: name, desc: txt(r[2]), sku: txt(r[3]), barcode: txt(r[4]), unit: txt(r[5]), source: txt(r[6]),
-      howto: txt(r[7]), location: txt(r[8]), notes: txt(r[9]) };
+    const code = txt(r[3]);
+    return { row: o.row, id: id, name: name, desc: txt(r[2]), sku: code, barcode: code, unit: txt(r[4]), source: txt(r[5]),
+      howto: txt(r[6]), location: txt(r[7]), notes: txt(r[8]), qty: num_(r[9]) };
   }).filter(Boolean);
+}
+
+function catRow_(id, it) {
+  const t = (v, n) => String(v || '').trim().slice(0, n);
+  const name = t(it.name, 120);
+  if (!name) throw new Error('חסר שם פריט.');
+  const code = t(it.sku || it.barcode, 60).replace(/\s+/g, '');
+  const q = num_(it.qty);
+  return [id, name, t(it.desc, 1000), code, t(it.unit, 40), t(it.source, 120), t(it.howto, 500), t(it.location, 120), t(it.notes, 1000), q === null ? '' : q];
+}
+
+function catDup_(cat, row, exceptId) {
+  const code = normId_(row[3]);
+  return cat.filter(c => c.id !== exceptId && ((code && normId_(c.sku) === code) || c.name === row[1]))[0];
 }
 
 function addCatalogItem(mgrPin, it) {
   mgrAuth_(mgrPin);
-  it = it || {};
-  const t = (v, n) => String(v || '').trim().slice(0, n);
-  const name = t(it.name, 120);
-  if (!name) throw new Error('חסר שם פריט.');
+  const row = catRow_('p' + Utilities.getUuid().slice(0, 8), it || {});
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const dup = catDup_(readCatalog_(), row, null);
+    if (dup) throw new Error('הפריט כבר קיים בקטלוג: ' + dup.name + '.');
+    const sh = ss_().getSheetByName(SH.catalog);
+    const r = sh.getLastRow() + 1;
+    sh.getRange(r, 4).setNumberFormat('@');
+    sh.getRange(r, 1, 1, CAT_HEADERS.length).setValues([row]);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return getState(mgrPin);
+}
+
+function updateCatalogItem(mgrPin, id, it) {
+  mgrAuth_(mgrPin);
+  id = String(id || '').trim();
+  const row = catRow_(id, it || {});
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     const cat = readCatalog_();
-    const bc = normId_(it.barcode), sku = normId_(it.sku);
-    const dup = cat.filter(c => (bc && normId_(c.barcode) === bc) || (sku && normId_(c.sku) === sku) || c.name === name)[0];
-    if (dup) throw new Error('הפריט כבר קיים בקטלוג: ' + dup.name + '.');
+    const cur = cat.filter(c => c.id === id)[0];
+    if (!cur) throw new Error('הפריט לא נמצא. רענן/י את הדף.');
+    const dup = catDup_(cat, row, id);
+    if (dup) throw new Error('כבר יש פריט עם אותו שם או מק״ט: ' + dup.name + '.');
     const sh = ss_().getSheetByName(SH.catalog);
-    sh.getRange(sh.getLastRow() + 1, 1, 1, CAT_HEADERS.length).setValues([['p' + Utilities.getUuid().slice(0, 8), name, t(it.desc, 1000),
-      t(it.sku, 60), t(it.barcode, 60), t(it.unit, 40), t(it.source, 120), t(it.howto, 500), t(it.location, 120), t(it.notes, 1000)]]);
+    sh.getRange(cur.row, 4).setNumberFormat('@');
+    sh.getRange(cur.row, 1, 1, CAT_HEADERS.length).setValues([row]);
     SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();
