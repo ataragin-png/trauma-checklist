@@ -159,6 +159,24 @@ details.dev summary::-webkit-details-marker{display:none}
   #print .nobc{font-family:var(--f-mono);font-size:10pt;color:#a00}
   #print .foot{margin-top:5mm;font-size:9pt;color:#444}
 }
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:13px;font-weight:500}
+.chips button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+details.item{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+details.item[open]{border-color:var(--accent)}
+details.item summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}
+details.item summary::-webkit-details-marker{display:none}
+details.item summary .nm{font-weight:600;min-width:0}
+.src{display:inline-block;font-size:12px;font-weight:600;border-radius:999px;padding:2px 10px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.src.none{background:var(--bg);color:var(--muted)}
+dl.facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 14px;margin:12px 0 0}
+dl.facts dt{color:var(--muted);font-size:13px;font-weight:600}
+dl.facts dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+dl.facts dd.where{font-weight:700;color:var(--accent)}
+.bcbox{margin-top:10px;background:#fff;border-radius:8px;padding:8px;display:inline-block;max-width:100%}
+.bcbox svg{max-width:100%;height:auto;display:block}
+.info{background:none;border:1px solid var(--line);color:var(--accent);border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;cursor:pointer;margin-inline-start:6px;vertical-align:1px;line-height:1;padding:0;font-family:var(--f-body)}
+.catlist{display:flex;flex-direction:column;gap:8px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:40;font-weight:600;max-width:calc(100% - 32px)}
 .toast.err{background:var(--crit);color:#fff}
 @media (prefers-reduced-motion:no-preference){.row,.opts button{transition:background-color .15s,border-color .15s}}
@@ -170,6 +188,7 @@ details.dev summary::-webkit-details-marker{display:none}
   <nav class="tabs" id="tabs">
     <button data-view="nurses">אחיות</button>
     <button data-view="volunteers">בנות שירות</button>
+    <button data-view="catalog">פריטים</button>
     <button data-view="manager">מנהל <span class="badge" id="badge" hidden>0</span></button>
   </nav>
 </div></header>
@@ -195,12 +214,12 @@ const TYPE={missing:'חסר',broken:'תקול'};
 const TZ='Asia/Jerusalem';
 const store={get(k){try{return localStorage.getItem(k)||''}catch(e){return''}},set(k,v){try{v?localStorage.setItem(k,v):localStorage.removeItem(k)}catch(e){}}};
 
-const S={loaded:false,error:'',items:[],last:{},openIssues:[],recent:[],isMgr:false,sheetUrl:'',unit:'',devices:[],devTypes:{},consumables:[],repairs:[],lastOrder:null,repairHistory:{}};
-let view=['nurses','volunteers','manager'].includes(store.get('view'))?store.get('view'):'nurses';
+const S={loaded:false,error:'',items:[],last:{},openIssues:[],recent:[],isMgr:false,sheetUrl:'',unit:'',devices:[],devTypes:{},consumables:[],repairs:[],lastOrder:null,repairHistory:{},catalog:[]};
+let view=['nurses','volunteers','catalog','manager'].includes(store.get('view'))?store.get('view'):'nurses';
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
-const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:false,clean:false},rq:''};
+const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:false,clean:false},rq:'',cq:'',csrc:'',copen:'',ni:{name:'',sku:'',barcode:'',unit:'',source:'',desc:'',howto:'',location:''}};
 let busy=false,pending=false;
 
 const $=s=>document.querySelector(s);
@@ -208,7 +227,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const dayKey=d=>new Date(d).toLocaleDateString('en-CA',{timeZone:TZ});
 const fmt=iso=>new Date(iso).toLocaleString('he-IL',{timeZone:TZ,weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 const API_URL=(window.TRAUMA_CONFIG&&window.TRAUMA_CONFIG.apiUrl)||'';
-const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,submitDeviceCheck:null,submitOrder:null,resolveIssue:['mgrPin','id'],addDevice:['mgrPin','device'],sendToRepair:['mgrPin','deviceId','reason'],returnFromRepair:['mgrPin','deviceId','note']};
+const ARGS={getState:['mgrPin'],verifyPin:['pin'],submitCheck:null,submitDeviceCheck:null,submitOrder:null,resolveIssue:['mgrPin','id'],addDevice:['mgrPin','device'],addCatalogItem:['mgrPin','item'],sendToRepair:['mgrPin','deviceId','reason'],returnFromRepair:['mgrPin','deviceId','note']};
 async function api(fn,...args){
   if(!API_URL)throw new Error('האתר עדיין לא מחובר לגיליון הנתונים.');
   const body=ARGS[fn]?Object.fromEntries(ARGS[fn].map((k,i)=>[k,args[i]])):Object.assign({},args[0]);
@@ -247,7 +266,7 @@ function toast(msg,kind){const t=$('#toast');t.textContent=msg;t.className='toas
 function apply(s){
   S.loaded=true;S.error='';S.items=s.items||[];S.last=s.last||{};S.unit=s.unit||'';S.isMgr=!!s.isMgr;
   S.openIssues=s.openIssues||[];S.recent=s.recent||[];S.sheetUrl=s.sheetUrl||'';
-  S.devices=s.devices||[];S.devTypes=s.devTypes||{};S.consumables=s.consumables||[];S.repairs=s.repairs||[];S.lastOrder=s.lastOrder||null;S.repairHistory=s.repairHistory||{};
+  S.devices=s.devices||[];S.devTypes=s.devTypes||{};S.consumables=s.consumables||[];S.repairs=s.repairs||[];S.lastOrder=s.lastOrder||null;S.repairHistory=s.repairHistory||{};S.catalog=s.catalog||[];
   if(mgrPin&&!S.isMgr){mgrPin='';store.set('mgrPin','')}
   scheduleRender();
 }
@@ -267,9 +286,10 @@ function render(){
   const main=$('#main');
   if(S.error&&!S.loaded){main.innerHTML=`<div class="panel"><h2>לא הצלחתי לטעון את הנתונים</h2><p class="empty">${esc(S.error)}</p><div><button class="btn" data-act="reload">ניסיון נוסף</button></div></div>`;$('#submitbar').hidden=true;return}
   if(!S.loaded){$('#submitbar').hidden=true;return}
-  main.innerHTML=view==='manager'?managerView():checkView(view);
-  $('#submitbar').hidden=view==='manager'||!selFreq[view];
-  if(view!=='manager')updateProgress();
+  main.innerHTML=view==='manager'?managerView():view==='catalog'?catalogView():checkView(view);
+  $('#submitbar').hidden=view==='manager'||view==='catalog'||!selFreq[view];
+  if(view!=='manager'&&view!=='catalog')updateProgress();
+  if(view==='catalog')drawCatBarcodes();
 }
 
 function checkView(team){
@@ -298,7 +318,7 @@ function genericBody(team,f,key,d){
   const groups=[],by={};
   for(const i of teamItems(team,f)){if(!by[i.cabinet]){by[i.cabinet]=[];groups.push(i.cabinet)}by[i.cabinet].push(i)}
   return`${groups.map(g=>`<section class="cab"><div class="cab-h"><h3>${esc(g)}</h3><button class="linkbtn" data-act="allok" data-cab="${esc(g)}">הכל תקין</button></div>
-    ${by[g].map(i=>`<div class="row s-${d[i.id]||'none'}"><div class="iname">${esc(i.name)}${i.critical?'<span class="tag">קריטי</span>':''}${i.qty?`<span class="qty">תקן: ${i.qty}</span>`:''}</div>
+    ${by[g].map(i=>`<div class="row s-${d[i.id]||'none'}"><div class="iname">${esc(i.name)}${infoBtn({name:i.name})}${i.critical?'<span class="tag">קריטי</span>':''}${i.qty?`<span class="qty">תקן: ${i.qty}</span>`:''}</div>
       <div class="opts" role="group" aria-label="${esc(i.name)}">${['ok','missing','broken'].map(v=>`<button data-act="mark" data-id="${esc(i.id)}" data-v="${v}" aria-pressed="${d[i.id]===v}">${v==='ok'?'תקין':TYPE[v]}</button>`).join('')}</div>
       ${d[i.id]==='missing'?`<div class="cntrow"><label for="c-${esc(i.id)}">כמה יש בפועל?</label><input type="number" min="0" inputmode="numeric" class="cnt" id="c-${esc(i.id)}" data-id="${esc(i.id)}" value="${esc(cnt[key+'|'+i.id])}">${i.qty?`<span class="muted">מתוך ${i.qty}</span>`:''}</div>`:''}</div>`).join('')}
   </section>`).join('')}`;
@@ -325,7 +345,7 @@ function orderBody(key){
   S.consumables.forEach(c=>{if(!by[c.category]){by[c.category]=[];cats.push(c.category)}by[c.category].push(c)});
   return cats.map(cat=>`<section class="cab"><div class="cab-h"><h3>${esc(cat)}</h3></div>
     <div class="ohead" aria-hidden="true"><span>פריט</span><span class="num">תקן</span><span class="num">במלאי</span><span class="num">להזמנה</span></div>
-    ${by[cat].map(c=>{const v=cnt[key+'|'+c.id],q=orderQty(c,v);return`<div class="orow"><div class="iname">${esc(c.name)}${c.unit?` <span class="muted">(${esc(c.unit)})</span>`:''}</div>
+    ${by[cat].map(c=>{const v=cnt[key+'|'+c.id],q=orderQty(c,v);return`<div class="orow"><div class="iname">${esc(c.name)}${infoBtn({name:c.name,barcode:c.barcode})}${c.unit?` <span class="muted">(${esc(c.unit)})</span>`:''}</div>
       <span class="num">${c.qty==null?'—':c.qty}</span>
       <input type="number" min="0" inputmode="numeric" class="stock" id="s-${esc(c.id)}" data-id="${esc(c.id)}" value="${esc(v)}" aria-label="מלאי קיים: ${esc(c.name)}">
       <span class="num toorder${q?' pos':''}" id="o-${esc(c.id)}">${q==null?'—':q}</span></div>`}).join('')}
@@ -341,6 +361,44 @@ function updateProgress(){
   $('#progress').textContent=txt;
   $('#submit').disabled=busy;$('#submit').textContent=busy?'שומר…':f==='order'?'שליחת הזמנה':'שמירת בדיקה';
 }
+
+function catFind(o){
+  const b=normId(o.barcode);
+  return S.catalog.find(c=>b&&(normId(c.barcode)===b||normId(c.sku)===b))||S.catalog.find(c=>o.name&&c.name.trim()===String(o.name).trim());
+}
+function infoBtn(o){const c=catFind(o);return c?`<button class="info" data-act="info" data-pid="${esc(c.id)}" aria-label="פרטים על ${esc(c.name)}" title="פרטים ומאיפה מביאים">i</button>`:''}
+function catalogView(){
+  const q=normId(st.cq),raw=st.cq.trim();
+  const srcs=[...new Set(S.catalog.map(c=>c.source).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'he'));
+  const list=S.catalog.filter(c=>(!st.csrc||(st.csrc==='—'?!c.source:c.source===st.csrc))&&(!raw||c.name.includes(raw)||c.desc.includes(raw)||(q&&(normId(c.sku).includes(q)||normId(c.barcode).includes(q)))))
+    .sort((a,b)=>a.name.localeCompare(b.name,'he'));
+  const fact=(l,v,cls)=>v?`<dt>${l}</dt><dd${cls?` class="${cls}"`:''}>${esc(v)}</dd>`:'';
+  const cards=list.map(c=>`<details class="item" data-pid="${esc(c.id)}"${st.copen===c.id||(raw&&list.length===1)?' open':''}><summary><span class="nm">${esc(c.name)}</span><span class="src${c.source?'':' none'}">${esc(c.source||'לא צוין מקור')}</span></summary>
+    <dl class="facts">${fact('מאיפה מביאים',c.source,'where')}${fact('איך מזמינים',c.howto)}${fact('תיאור',c.desc)}${fact('מק״ט',c.sku)}${fact('ברקוד',c.barcode)}${fact('יחידת מידה',c.unit)}${fact('מיקום בחדר',c.location)}${fact('הערות',c.notes)}</dl>
+    ${c.barcode?`<div class="bcbox"><svg data-bc="${esc(c.barcode)}"></svg></div>`:''}</details>`).join('');
+  const ni=st.ni;
+  const addForm=S.isMgr?`<section class="panel"><h2>הוספת פריט לקטלוג</h2><p class="statusline">שדות נוספים, כמו הערות ותיקונים, עורכים בלשונית "קטלוג פריטים" בגיליון.</p>
+    <div class="formrow"><input id="ni-name" placeholder="שם הפריט" value="${esc(ni.name)}"></div>
+    <div class="formrow"><input id="ni-barcode" placeholder="ברקוד" value="${esc(ni.barcode)}" style="direction:ltr;text-align:right"><button class="btn ghost scan" data-act="scancatadd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
+    <div class="formrow"><input id="ni-sku" placeholder="מק״ט" value="${esc(ni.sku)}" style="direction:ltr;text-align:right"><input id="ni-unit" placeholder="יחידת מידה (קופסה, יח׳…)" value="${esc(ni.unit)}"></div>
+    <div class="formrow"><input id="ni-source" list="ni-srcs" placeholder="מאיפה מביאים" value="${esc(ni.source)}"><datalist id="ni-srcs">${srcs.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist>
+      <input id="ni-location" placeholder="מיקום בחדר הטראומה" value="${esc(ni.location)}"></div>
+    <div class="formcol"><textarea id="ni-desc" placeholder="תיאור הפריט">${esc(ni.desc)}</textarea><textarea id="ni-howto" placeholder="איך מזמינים / איש קשר / טלפון">${esc(ni.howto)}</textarea></div>
+    <div><button class="btn" data-act="addcat">הוספה לקטלוג</button></div></section>`:'';
+  return`<section class="panel"><h2>קטלוג פריטים</h2>
+    <p class="statusline">כל הפריטים, ולכל אחד מאיפה מביאים אותו. לוחצים על פריט כדי לראות את כל הפרטים.</p>
+    <div class="formrow"><input id="cq" placeholder="חיפוש לפי שם, מק״ט או ברקוד" value="${esc(st.cq)}"><button class="btn ghost scan" data-act="scancat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקה</button></div>
+    ${srcs.length?`<div class="chips" role="group" aria-label="סינון לפי מקור"><button data-act="csrc" data-v="" aria-pressed="${!st.csrc}">הכל</button>${srcs.map(x=>`<button data-act="csrc" data-v="${esc(x)}" aria-pressed="${st.csrc===x}">${esc(x)}</button>`).join('')}${S.catalog.some(c=>!c.source)?`<button data-act="csrc" data-v="—" aria-pressed="${st.csrc==='—'}">בלי מקור</button>`:''}</div>`:''}
+    <p class="statusline"><b>${list.length}</b> מתוך ${S.catalog.length} פריטים</p></section>
+  ${S.catalog.length?(list.length?`<div class="catlist">${cards}</div>`:`<p class="empty">לא נמצא פריט שמתאים לחיפוש.</p>`):`<div class="panel"><p class="empty">הקטלוג עדיין ריק. ${S.isMgr?'מוסיפים פריטים בטופס למטה או ישירות בגיליון, בלשונית "קטלוג פריטים".':'המנהל מוסיף פריטים בגיליון.'}</p></div>`}
+  ${addForm}`;
+}
+function drawCatBarcodes(){
+  const open=[...document.querySelectorAll('details.item[open] svg[data-bc]')];if(!open.length)return;
+  loadJsBarcode().then(()=>open.forEach(el=>{if(el.dataset.done)return;el.dataset.done='1';const v=el.dataset.bc;
+    try{JsBarcode(el,v,{format:bcFormat(v),height:44,width:1.7,fontSize:13,margin:0})}catch(e){el.parentNode.hidden=true}})).catch(()=>{});
+}
+document.addEventListener('toggle',e=>{const d=e.target;if(d.matches&&d.matches('details.item')){if(d.open){st.copen=d.dataset.pid;drawCatBarcodes()}else if(st.copen===d.dataset.pid)st.copen=''}},true);
 
 function managerView(){
   if(!S.isMgr)return`<section class="panel"><h2>כניסת מנהל</h2>
@@ -429,6 +487,8 @@ document.getElementById('main').addEventListener('input',e=>{
   else if(t.id==='hq'){st.hq=t.value;clearTimeout(window.__hqT);window.__hqT=setTimeout(()=>{const pos=t.selectionStart;render();const el=$('#hq');if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}},400)}
   else if(t.id==='rq'){st.rq=t.value;clearTimeout(window.__rqT);window.__rqT=setTimeout(()=>{const pos=t.selectionStart;render();const el=$('#rq');if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}},400)}
   else if(t.dataset&&t.dataset.rn)st.rnote[t.dataset.rn]=t.value;
+  else if(t.id==='cq'){st.cq=t.value;clearTimeout(window.__cqT);window.__cqT=setTimeout(()=>{const pos=t.selectionStart;render();const el=$('#cq');if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}},350)}
+  else if(t.id&&t.id.startsWith('ni-'))st.ni[t.id.slice(3)]=t.value;
   else if(t.id&&t.id.startsWith('nd-')){const k=t.id.slice(3);st.nd[k]=t.type==='checkbox'?t.checked:t.value}
   else if(t.classList.contains('cnt'))cnt[view+'|'+selFreq[view]+'|'+t.dataset.id]=t.value;
   else if(t.classList.contains('stock')){
@@ -466,6 +526,13 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='login'){login();return}
   if(act==='logout'){mgrPin='';store.set('mgrPin','');S.isMgr=false;S.openIssues=[];render();return}
   if(act==='printorder'){printOrder(S.lastOrder);return}
+  if(act==='info'){view='catalog';store.set('view',view);st.cq='';st.csrc='';st.copen=b.dataset.pid;render();const el=document.querySelector(`details.item[data-pid="${CSS.escape(b.dataset.pid)}"]`);if(el)el.scrollIntoView({block:'center'});return}
+  if(act==='csrc'){st.csrc=b.dataset.v;render();return}
+  if(act==='scancat'){openScanner('catlookup');return}
+  if(act==='scancatadd'){openScanner('catadd');return}
+  if(act==='addcat'){
+    if(!st.ni.name.trim()){toast('יש להזין שם פריט','err');return}
+    b.disabled=true;try{apply(await api('addCatalogItem',mgrPin,Object.assign({},st.ni)));toast(`${st.ni.name} נוסף לקטלוג`);st.ni={name:'',sku:'',barcode:'',unit:st.ni.unit,source:st.ni.source,desc:'',howto:st.ni.howto,location:''};render()}catch(err){b.disabled=false;toast(cleanErr(err),'err')}return}
   if(act==='scan'){openScanner('check');return}
   if(act==='scanadd'){openScanner('add');return}
   if(act==='scanlookup'){openScanner('lookup');return}
@@ -570,7 +637,7 @@ function scanCount(){
 async function openScanner(mode){
   scanMode=mode;lastCode='';
   $('#scanov').hidden=false;$('#scanmanual').value='';
-  $('#scantitle').textContent={add:'סריקת מכשיר חדש',lookup:'חיפוש מכשיר',repair:'מכשיר לתיקון'}[mode]||'סריקת מכשירים';
+  $('#scantitle').textContent={add:'סריקת מכשיר חדש',lookup:'חיפוש מכשיר',repair:'מכשיר לתיקון',catlookup:'חיפוש פריט',catadd:'ברקוד של פריט חדש'}[mode]||'סריקת מכשירים';
   scanMsg('מכוונים את המצלמה לברקוד שעל המדבקה.');scanCount();
   try{
     await loadLib();
@@ -598,6 +665,8 @@ function onCode(text){
 }
 function handleCode(code,raw){
   const dev=S.devices.find(x=>normId(x.id)===code);
+  if(scanMode==='catlookup'){const c=catFind({barcode:raw});st.cq=c?'':raw;st.csrc='';st.copen=c?c.id:'';closeScanner().then(()=>{render();if(c){const el=document.querySelector(`details.item[data-pid="${CSS.escape(c.id)}"]`);if(el)el.scrollIntoView({block:'center'})}else toast('לא נמצא פריט עם הברקוד '+raw,'err')});return}
+  if(scanMode==='catadd'){const c=catFind({barcode:raw});if(c){scanMsg('הפריט כבר בקטלוג: '+c.name,'warn');return}st.ni.barcode=raw.replace(/\s+/g,'');closeScanner().then(()=>{render();const el=$('#ni-name');if(el)el.focus()});return}
   if(scanMode==='lookup'){st.hq=dev?dev.id:raw;closeScanner().then(()=>{render();const el=$('#histsec');if(el)el.scrollIntoView({block:'start'})});return}
   if(scanMode==='repair'){
     if(!dev){scanMsg('ברקוד לא מוכר: '+raw+'. המכשיר לא נמצא ברשימה.','bad');return}

@@ -11,7 +11,7 @@ const SITE_URL = 'https://ataragin-png.github.io/trauma-checklist/';
 
 const TZ = 'Asia/Jerusalem';
 const SH = { items: 'ציוד', checks: 'בדיקות', issues: 'חוסרים ותקלות', settings: 'הגדרות',
-  devices: 'מכשור רפואי', devTypes: 'תקן מכשירים', repairs: 'תיקונים', consumables: 'מתכלים', orders: 'הזמנות' };
+  devices: 'מכשור רפואי', devTypes: 'תקן מכשירים', repairs: 'תיקונים', consumables: 'מתכלים', orders: 'הזמנות', catalog: 'קטלוג פריטים' };
 const TEAM_HE = { nurses: 'אחיות', volunteers: 'בנות שירות' };
 const GEN_FREQ_HE = { daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית' };
 // Special volunteer checklists share the checks log; their key goes in the "תדירות" column.
@@ -29,6 +29,7 @@ const DEVTYPE_HEADERS = ['סוג מכשיר', 'כמות תקן'];
 const REPAIR_HEADERS = ['מספר זיהוי', 'סוג מכשיר', 'תאריך שליחה', 'תקלה / סיבה', 'תאריך חזרה', 'הערת חזרה', 'סטטוס'];
 const CONS_HEADERS = ['מזהה', 'פריט', 'קטגוריה', 'יחידת מידה', 'כמות תקן', 'ברקוד / מק״ט'];
 const ORDER_HEADERS = ['מזהה הזמנה', 'תאריך', 'בת שירות', 'פריט', 'קטגוריה', 'יחידה', 'תקן', 'מלאי קיים', 'להזמנה', 'ברקוד / מק״ט'];
+const CAT_HEADERS = ['מזהה', 'שם פריט', 'תיאור', 'מק״ט', 'ברקוד', 'יחידת מידה', 'מאיפה מביאים', 'איך מזמינים / איש קשר', 'מיקום בחדר הטראומה', 'הערות'];
 const ISSUE_HEADERS = ['מזהה', 'תאריך דיווח', 'פריט', 'ארון / מיקום', 'סוג', 'כמות תקן', 'נמצאו בפועל', 'להשלים',
   'דווח ע"י', 'צוות', 'הערה', 'סטטוס', 'תאריך טיפול', 'מזהה פריט'];
 
@@ -102,6 +103,7 @@ function handle_(p) {
       case 'sendToRepair': data = sendToRepair(p.mgrPin, p.deviceId, p.reason); break;
       case 'returnFromRepair': data = returnFromRepair(p.mgrPin, p.deviceId, p.note); break;
       case 'addDevice': data = addDevice(p.mgrPin, p.device); break;
+      case 'addCatalogItem': data = addCatalogItem(p.mgrPin, p.item); break;
       default: throw new Error('פעולה לא מוכרת.');
     }
     return json_({ ok: true, data: data });
@@ -211,7 +213,7 @@ function getState(mgrPin) {
   });
   const res = { unit: s.unit, items: items, last: last, isMgr: isMgr,
     devices: readDevices_().map(d => ({ id: d.id, type: d.type, location: d.location, vol: d.vol, clean: d.clean, status: d.status })),
-    devTypes: readDevTypes_(), consumables: readConsumables_() };
+    devTypes: readDevTypes_(), consumables: readConsumables_(), catalog: readCatalog_() };
   if (isMgr) {
     res.openIssues = readIssues_().filter(x => x.status === 'open').sort((a, b) => (a.at < b.at ? 1 : -1));
     res.recent = checks.slice().sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 15);
@@ -329,6 +331,15 @@ function setupV2() {
   cons.getRange(2, 6, N, 1).setNumberFormat('@');
   cons.getRange('F1').setNote('הברקוד או המק״ט כפי שהוא נסרק במערכת ההזמנות של בית החולים. נשמר כטקסט כדי לא לאבד אפסים בהתחלה.');
 
+  const cat = sheet_(SH.catalog, CAT_HEADERS);
+  cat.getRange(2, 4, N * 2, 2).setNumberFormat('@');
+  cat.getRange('A1').setNote('מזהה פנימי. נוצר אוטומטית, אין צורך למלא.');
+  cat.getRange('G1').setNote('מאיפה מביאים את הפריט: למשל מחסן מרכזי, בית מרקחת, מחסן סטרילי, הנדסה רפואית, ספק.');
+  cat.getRange('A2:A').setFontColor('#8a969c');
+  cat.setColumnWidth(1, 80).setColumnWidth(2, 220).setColumnWidth(3, 280).setColumnWidth(4, 110).setColumnWidth(5, 150)
+    .setColumnWidth(6, 90).setColumnWidth(7, 160).setColumnWidth(8, 220).setColumnWidth(9, 170).setColumnWidth(10, 220);
+  cat.getRange(2, 1, N * 2, CAT_HEADERS.length).setWrap(true).setVerticalAlignment('top');
+
   const ord = sheet_(SH.orders, ORDER_HEADERS);
   ord.getRange('B2:B').setNumberFormat('dd/MM/yyyy HH:mm');
   ord.setColumnWidth(2, 130).setColumnWidth(3, 130).setColumnWidth(4, 260).setColumnWidth(10, 170);
@@ -362,6 +373,42 @@ function readConsumables_() {
     return { id: id, name: name, category: String(r[2] || '').trim() || 'כללי', unit: String(r[3] || '').trim(), qty: num_(r[4]),
       barcode: r[5] === undefined || r[5] === null ? '' : String(r[5]).trim() };
   }).filter(Boolean);
+}
+
+function readCatalog_() {
+  const sh = ss_().getSheetByName(SH.catalog);
+  const txt = v => (v === undefined || v === null ? '' : String(v).trim());
+  return readRows_(SH.catalog, 3000).map(o => {
+    const r = o.r, name = txt(r[1]);
+    if (!name) return null;
+    let id = txt(r[0]);
+    if (!id) { id = 'p' + Utilities.getUuid().slice(0, 8); sh.getRange(o.row, 1).setValue(id); }
+    return { id: id, name: name, desc: txt(r[2]), sku: txt(r[3]), barcode: txt(r[4]), unit: txt(r[5]), source: txt(r[6]),
+      howto: txt(r[7]), location: txt(r[8]), notes: txt(r[9]) };
+  }).filter(Boolean);
+}
+
+function addCatalogItem(mgrPin, it) {
+  mgrAuth_(mgrPin);
+  it = it || {};
+  const t = (v, n) => String(v || '').trim().slice(0, n);
+  const name = t(it.name, 120);
+  if (!name) throw new Error('חסר שם פריט.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const cat = readCatalog_();
+    const bc = normId_(it.barcode), sku = normId_(it.sku);
+    const dup = cat.filter(c => (bc && normId_(c.barcode) === bc) || (sku && normId_(c.sku) === sku) || c.name === name)[0];
+    if (dup) throw new Error('הפריט כבר קיים בקטלוג: ' + dup.name + '.');
+    const sh = ss_().getSheetByName(SH.catalog);
+    sh.getRange(sh.getLastRow() + 1, 1, 1, CAT_HEADERS.length).setValues([['p' + Utilities.getUuid().slice(0, 8), name, t(it.desc, 1000),
+      t(it.sku, 60), t(it.barcode, 60), t(it.unit, 40), t(it.source, 120), t(it.howto, 500), t(it.location, 120), t(it.notes, 1000)]]);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return getState(mgrPin);
 }
 
 function readRepairs_() {
