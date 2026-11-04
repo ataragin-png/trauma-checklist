@@ -8,7 +8,7 @@
 
 const SHEET_ID = '1dg1sYid-MfXceeg4bV1Ay1WxlxmND8A3u6DZQisB8aI';
 const SITE_URL = 'https://ataragin-png.github.io/trauma-checklist/';
-const SERVER_VERSION = '2026-11-04-night-notes';
+const SERVER_VERSION = '2026-11-04-add-item';
 
 const TZ = 'Asia/Jerusalem';
 const SH = { items: 'ציוד', checks: 'בדיקות', issues: 'חוסרים ותקלות', settings: 'הגדרות',
@@ -106,6 +106,7 @@ function handle_(p) {
       case 'returnFromRepair': data = returnFromRepair(p.mgrPin, p.deviceId, p.note); break;
       case 'addDevice': data = addDevice(p.mgrPin, p.device); break;
       case 'addCatalogItem': data = addCatalogItem(p.mgrPin, p.item); break;
+      case 'addChecklistItem': data = addChecklistItem(p.mgrPin, p.item); break;
       case 'updateCatalogItem': data = updateCatalogItem(p.mgrPin, p.id, p.item); break;
       default: throw new Error('פעולה לא מוכרת.');
     }
@@ -735,6 +736,31 @@ function upgradeItemsSheet_(sh) {
   sh.getRange(2, 8, 500, 1).setWrap(true);
   sh.getRange(2, 5, 500, 1).setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(Object.values(GEN_FREQ_HE)).setAllowInvalid(false).build());
+}
+
+/** Manager adds one item to a checklist (ציוד sheet). */
+function addChecklistItem(mgrPin, it) {
+  mgrAuth_(mgrPin);
+  it = it || {};
+  const t = (v, n) => String(v || '').trim().slice(0, n);
+  const name = t(it.name, 160);
+  if (!name) throw new Error('חסר שם פריט.');
+  if (!TEAM_HE[it.team] || !GEN_FREQ_HE[it.freq]) throw new Error('צוות או תדירות לא תקינים.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sh = ss_().getSheetByName(SH.items);
+    upgradeItemsSheet_(sh);
+    const q = num_(it.qty);
+    const r = sh.getLastRow() + 1;
+    sh.getRange(r, 9).setNumberFormat('@');
+    sh.getRange(r, 1, 1, ITEM_HEADERS.length).setValues([['i' + Utilities.getUuid().slice(0, 8), name, t(it.cabinet, 80) || 'כללי',
+      TEAM_HE[it.team], GEN_FREQ_HE[it.freq], it.critical === true, q === null ? '' : q, t(it.instr, 500), t(it.barcode, 60).replace(/\s+/g, '')]]);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return getState(mgrPin);
 }
 
 function readItems_() {
