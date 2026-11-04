@@ -8,22 +8,22 @@
 
 const SHEET_ID = '1dg1sYid-MfXceeg4bV1Ay1WxlxmND8A3u6DZQisB8aI';
 const SITE_URL = 'https://ataragin-png.github.io/trauma-checklist/';
-const SERVER_VERSION = '2026-11-04-autodeploy';
+const SERVER_VERSION = '2026-11-04-night-notes';
 
 const TZ = 'Asia/Jerusalem';
 const SH = { items: 'ציוד', checks: 'בדיקות', issues: 'חוסרים ותקלות', settings: 'הגדרות',
   devices: 'מכשור רפואי', devTypes: 'תקן מכשירים', repairs: 'תיקונים', consumables: 'מתכלים', orders: 'הזמנות', catalog: 'קטלוג פריטים' };
 const TEAM_HE = { nurses: 'אחיות', volunteers: 'בנות שירות' };
-const GEN_FREQ_HE = { daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית' };
+const GEN_FREQ_HE = { night: 'לילה', daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית' };
 // Special volunteer checklists share the checks log; their key goes in the "תדירות" column.
-const FREQ_HE = { daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית', devices: 'מכשור רפואי – יומי', order: 'הזמנה שבועית' };
-const FREQ_DAYS = { daily: 1, weekly: 7, monthly: 31, devices: 1, order: 7 };
+const FREQ_HE = { night: 'לילה', daily: 'יומית', weekly: 'שבועית', monthly: 'חודשית', devices: 'מכשור רפואי – יומי', order: 'הזמנה שבועית' };
+const FREQ_DAYS = { night: 1, daily: 1, weekly: 7, monthly: 31, devices: 1, order: 7 };
 const DAILY_KEYS = { daily: true, devices: true };
 const DEV_ACTIVE = 'פעיל', DEV_REPAIR = 'בתיקון';
 const TYPE_HE = { missing: 'חסר', broken: 'תקול' };
 const STATUS_OPEN = 'פתוח', STATUS_DONE = 'טופל';
 
-const ITEM_HEADERS = ['מזהה', 'פריט', 'ארון / מיקום', 'מי בודק', 'תדירות', 'קריטי', 'כמות תקן'];
+const ITEM_HEADERS = ['מזהה', 'פריט', 'ארון / מיקום', 'מי בודק', 'תדירות', 'קריטי', 'כמות תקן', 'מה בודקים / למה לשים לב', 'ברקוד / מק״ט (לא חובה)'];
 const CHECK_HEADERS = ['תאריך ושעה', 'צוות', 'תדירות', 'בודק/ת', 'מס׳ בעיות', 'מס׳ פריטים', 'הערות', 'פריטים עם בעיה'];
 const DEVICE_HEADERS = ['מספר זיהוי (הנדסה רפואית)', 'סוג מכשיר', 'מיקום', 'בצ׳קליסט בנות שירות', 'בצ׳קליסט מנקים', 'סטטוס', 'הערות'];
 const DEVTYPE_HEADERS = ['סוג מכשיר', 'כמות תקן'];
@@ -240,7 +240,8 @@ function submitCheck(p) {
   if (!TEAM_HE[p.team] || !GEN_FREQ_HE[p.freq]) throw new Error('נתוני הבדיקה לא תקינים. רענן/י את הדף.');
   const by = String(p.by || '').trim().slice(0, 60);
   if (!by) throw new Error('יש להזין שם בודק/ת.');
-  const results = p.results || {}, found = p.found || {};
+  const results = p.results || {}, found = p.found || {}, itemNotes = p.itemNotes || {};
+  const inote = i => String(itemNotes[i.id] || '').trim().slice(0, 300);
   const list = readItems_().filter(i => i.team === p.team && i.freq === p.freq);
   if (!list.length) throw new Error('אין פריטים לבדיקה הזו.');
   if (list.some(i => ['ok', 'missing', 'broken'].indexOf(results[i.id]) === -1))
@@ -255,7 +256,8 @@ function submitCheck(p) {
     const probs = list.filter(i => results[i.id] !== 'ok');
     ss_().getSheetByName(SH.checks).appendRow([
       now, TEAM_HE[p.team], FREQ_HE[p.freq], by, probs.length, list.length, notes,
-      probs.map(i => i.name + ' – ' + TYPE_HE[results[i.id]]).join('; '),
+      list.filter(i => results[i.id] !== 'ok' || inote(i)).map(i => i.name + ' – ' + (results[i.id] === 'ok' ? 'תקין' : TYPE_HE[results[i.id]]) +
+        (inote(i) ? ' (' + inote(i) + ')' : '')).join('; '),
     ]);
     const ish = ss_().getSheetByName(SH.issues);
     const open = readIssues_().filter(x => x.status === 'open');
@@ -269,8 +271,8 @@ function submitCheck(p) {
         return;
       }
       ish.appendRow(['x' + Utilities.getUuid().slice(0, 8), now, i.name, i.cabinet, TYPE_HE[type],
-        i.qty === null ? '' : i.qty, f === null ? '' : f, need, by, TEAM_HE[p.team], notes, STATUS_OPEN, '', i.id]);
-      created.push({ i: i, type: type, f: f, need: need });
+        i.qty === null ? '' : i.qty, f === null ? '' : f, need, by, TEAM_HE[p.team], [inote(i), notes].filter(Boolean).join(' · '), STATUS_OPEN, '', i.id]);
+      created.push({ i: i, type: type, f: f, need: need, note: inote(i) });
     });
     SpreadsheetApp.flush();
   } finally {
@@ -652,6 +654,7 @@ function sendIssueAlert_(s, created, by, team, notes) {
     let t = '• ' + c.i.name + ' (' + c.i.cabinet + ') – ' + TYPE_HE[c.type];
     if (c.type === 'missing' && c.f !== null) t += c.i.qty !== null ? ' · יש ' + c.f + ' מתוך ' + c.i.qty + ', להשלים ' + c.need : ' · יש ' + c.f;
     if (c.i.critical) t += ' · קריטי';
+    if (c.note) t += '\n   הערה: ' + c.note;
     return t;
   });
   const body = 'דווח ע"י ' + by + ' (' + TEAM_HE[team] + ')\n\n' + lines.join('\n') +
@@ -683,7 +686,8 @@ function dailyReport() {
     const label = TEAM_HE[t] + ' – ' + FREQ_HE[f];
     if (!l) { late.push('• ' + label + ': טרם בוצעה'); return; }
     const d = new Date(l.at);
-    const overdue = DAILY_KEYS[f]
+    const overdue = f === 'night' ? (now - d) / 36e5 > 16
+      : DAILY_KEYS[f]
       ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd') < yesterday
       : (now - d) / 864e5 > FREQ_DAYS[f];
     if (overdue) late.push('• ' + label + ': אחרונה ' + Utilities.formatDate(d, TZ, 'dd/MM HH:mm') + ' (' + l.by + ')');
@@ -722,8 +726,20 @@ function settings_() {
   return { staffPin: v[0], managerPin: v[1], email: v[2], unit: v[3] || 'חדר טראומה' };
 }
 
+/** Adds the "מה בודקים" column and the night frequency to an existing items sheet. Runs once. */
+function upgradeItemsSheet_(sh) {
+  if (String(sh.getRange(1, 9).getValue()).trim() === ITEM_HEADERS[8]) return;
+  sh.getRange(1, 1, 1, ITEM_HEADERS.length).setValues([ITEM_HEADERS]).setFontWeight('bold').setBackground('#dcedef');
+  sh.setColumnWidth(8, 320).setColumnWidth(9, 170);
+  sh.getRange(2, 9, 500, 1).setNumberFormat('@');
+  sh.getRange(2, 8, 500, 1).setWrap(true);
+  sh.getRange(2, 5, 500, 1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInList(Object.values(GEN_FREQ_HE)).setAllowInvalid(false).build());
+}
+
 function readItems_() {
   const sh = ss_().getSheetByName(SH.items);
+  upgradeItemsSheet_(sh);
   const last = sh.getLastRow();
   if (last < 2) return [];
   const vals = sh.getRange(2, 1, last - 1, ITEM_HEADERS.length).getValues();
@@ -737,7 +753,8 @@ function readItems_() {
     if (!t || !f) return;
     const q = num_(r[6]);
     out.push({ id: String(r[0]), name: name, cabinet: String(r[2]).trim() || 'כללי', team: t, freq: f,
-      critical: r[5] === true, qty: q !== null && q > 0 ? q : null });
+      critical: r[5] === true, qty: q !== null && q > 0 ? q : null, instr: String(r[7] || '').trim(),
+      barcode: r[8] === undefined || r[8] === null ? '' : String(r[8]).trim() });
   });
   return out;
 }

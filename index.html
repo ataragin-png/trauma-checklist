@@ -177,6 +177,10 @@ dl.facts dd.where{font-weight:700;color:var(--accent)}
 .bcbox svg{max-width:100%;height:auto;display:block}
 .info{background:none;border:1px solid var(--line);color:var(--accent);border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;cursor:pointer;margin-inline-start:6px;vertical-align:1px;line-height:1;padding:0;font-family:var(--f-body)}
 .catlist{display:flex;flex-direction:column;gap:8px}
+.instr{display:block;font-size:13px;color:var(--muted);margin-top:2px;font-weight:400}
+.notebtn{flex-basis:100%;text-align:start;padding:2px 0;font-size:12px}
+.inote{flex-basis:100%}
+.inote textarea{width:100%;min-height:44px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;resize:vertical}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:40;font-weight:600;max-width:calc(100% - 32px)}
 .toast.err{background:var(--crit);color:#fff}
 @media (prefers-reduced-motion:no-preference){.row,.opts button{transition:background-color .15s,border-color .15s}}
@@ -208,8 +212,8 @@ dl.facts dd.where{font-weight:700;color:var(--accent)}
 </div>
 
 <script>
-const FREQ={devices:{label:'מכשור רפואי – יומי',days:1,daily:true},daily:{label:'ציוד – יומי',days:1,daily:true},order:{label:'הזמנה שבועית',days:7},weekly:{label:'ציוד – שבועי',days:7},monthly:{label:'ציוד – חודשי',days:31}};
-const FREQ_ORDER=['devices','daily','order','weekly','monthly'];
+const FREQ={night:{label:'בדיקת לילה',days:1,night:true},devices:{label:'מכשור רפואי – יומי',days:1,daily:true},daily:{label:'ציוד – יומי',days:1,daily:true},order:{label:'הזמנה שבועית',days:7},weekly:{label:'ציוד – שבועי',days:7},monthly:{label:'ציוד – חודשי',days:31}};
+const FREQ_ORDER=['night','devices','daily','order','weekly','monthly'];
 const TEAM={nurses:'אחיות',volunteers:'בנות שירות'};
 const TYPE={missing:'חסר',broken:'תקול'};
 const TZ='Asia/Jerusalem';
@@ -221,7 +225,7 @@ let view=store.get('view')==='catalog'?'consumables':(VIEWS.includes(store.get('
 let staffPin=store.get('staffPin'),mgrPin=store.get('mgrPin');
 const selFreq={nurses:null,volunteers:null};
 const draft={},cnt={};
-const st={name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:false,clean:false},rq:'',cq:'',csrc:'',copen:'',ni:{name:'',sku:'',unit:'',qty:'',source:'',desc:'',howto:'',location:''},cedit:'',ce:{}};
+const st={inotes:{},inopen:{},name:store.get('checker'),note:'',pinDraft:'',mgrDraft:'',rdev:'',rreason:'',rnote:{},hq:'',nd:{id:'',type:'',loc:'',vol:false,clean:false},rq:'',cq:'',csrc:'',copen:'',ni:{name:'',sku:'',unit:'',qty:'',source:'',desc:'',howto:'',location:''},cedit:'',ce:{}};
 let busy=false,pending=false;
 
 const $=s=>document.querySelector(s);
@@ -256,6 +260,11 @@ function due(team,freq){
   const c=S.last[team+'|'+freq];
   if(!c)return{state:'never'};
   if(FREQ[freq].daily)return{state:dayKey(c.at)===dayKey(Date.now())?'done':'overdue',c};
+  if(FREQ[freq].night){ // night shift starts 23:00; a check from 19:00 onward counts for that night
+    const now=new Date(),h=Number(now.toLocaleString('en-US',{timeZone:TZ,hour:'numeric',hour12:false}))%24;
+    const hrsSinceStart=h>=23?h-23:h+1, start=Date.now()-hrsSinceStart*36e5-now.getMinutes()*6e4;
+    return{state:new Date(c.at).getTime()>=start-4*36e5?'done':'overdue',c};
+  }
   return{state:(Date.now()-new Date(c.at))/864e5<=FREQ[freq].days?'done':'overdue',c};
 }
 function alertCount(){return S.isMgr?S.openIssues.length+combos().filter(([t,f])=>due(t,f).state!=='done').length:0}
@@ -320,10 +329,12 @@ function checkView(team){
 function genericBody(team,f,key,d){
   const groups=[],by={};
   for(const i of teamItems(team,f)){if(!by[i.cabinet]){by[i.cabinet]=[];groups.push(i.cabinet)}by[i.cabinet].push(i)}
-  return`${groups.map(g=>`<section class="cab"><div class="cab-h"><h3>${esc(g)}</h3><button class="linkbtn" data-act="allok" data-cab="${esc(g)}">הכל תקין</button></div>
-    ${by[g].map(i=>`<div class="row s-${d[i.id]||'none'}"><div class="iname">${esc(i.name)}${infoBtn({name:i.name})}${i.critical?'<span class="tag">קריטי</span>':''}${i.qty?`<span class="qty">תקן: ${i.qty}</span>`:''}</div>
+  const withBc=teamItems(team,f).filter(i=>i.barcode),scanned=withBc.filter(i=>d[i.id]==='ok').length;
+  return`${withBc.length?`<section class="panel scanbar"><span class="statusline">פריטים עם ברקוד: סורקים והם מסומנים "תקין" לבד. השאר מסמנים ידנית. <b>${scanned}/${withBc.length}</b></span><button class="btn scan" data-act="scangen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>סריקת ברקוד</button></section>`:''}${groups.map(g=>`<section class="cab"><div class="cab-h"><h3>${esc(g)}</h3><button class="linkbtn" data-act="allok" data-cab="${esc(g)}">הכל תקין</button></div>
+    ${by[g].map(i=>{const nk=key+'|'+i.id,nv=st.inotes[nk]||'',nOpen=st.inopen[nk]||nv;return`<div class="row s-${d[i.id]||'none'}"><div class="iname">${esc(i.name)}${infoBtn({name:i.name})}${i.critical?'<span class="tag">קריטי</span>':''}${i.qty?`<span class="qty">תקן: ${i.qty}</span>`:''}${i.barcode?'<span class="qty" title="אפשר לסרוק">ברקוד</span>':''}${i.instr?`<span class="instr">${esc(i.instr)}</span>`:''}</div>
       <div class="opts" role="group" aria-label="${esc(i.name)}">${['ok','missing','broken'].map(v=>`<button data-act="mark" data-id="${esc(i.id)}" data-v="${v}" aria-pressed="${d[i.id]===v}">${v==='ok'?'תקין':TYPE[v]}</button>`).join('')}</div>
-      ${d[i.id]==='missing'?`<div class="cntrow"><label for="c-${esc(i.id)}">כמה יש בפועל?</label><input type="number" min="0" inputmode="numeric" class="cnt" id="c-${esc(i.id)}" data-id="${esc(i.id)}" value="${esc(cnt[key+'|'+i.id])}">${i.qty?`<span class="muted">מתוך ${i.qty}</span>`:''}</div>`:''}</div>`).join('')}
+      ${d[i.id]==='missing'?`<div class="cntrow"><label for="c-${esc(i.id)}">כמה יש בפועל?</label><input type="number" min="0" inputmode="numeric" class="cnt" id="c-${esc(i.id)}" data-id="${esc(i.id)}" value="${esc(cnt[key+'|'+i.id])}">${i.qty?`<span class="muted">מתוך ${i.qty}</span>`:''}</div>`:''}
+      ${nOpen?`<div class="inote"><textarea class="inotein" id="n-${esc(i.id)}" data-nk="${esc(nk)}" placeholder="הערה על ${esc(i.name)}">${esc(nv)}</textarea></div>`:`<button class="linkbtn notebtn" data-act="inote" data-nk="${esc(nk)}">+ הערה</button>`}</div>`}).join('')}
   </section>`).join('')}`;
 }
 
@@ -510,6 +521,7 @@ document.getElementById('main').addEventListener('input',e=>{
   else if(t.id&&t.id.startsWith('ce-'))st.ce[t.id.slice(3)]=t.value;
   else if(t.id&&t.id.startsWith('nd-')){const k=t.id.slice(3);st.nd[k]=t.type==='checkbox'?t.checked:t.value}
   else if(t.classList.contains('cnt'))cnt[view+'|'+selFreq[view]+'|'+t.dataset.id]=t.value;
+  else if(t.classList.contains('inotein'))st.inotes[t.dataset.nk]=t.value;
   else if(t.classList.contains('stock')){
     const key=view+'|'+selFreq[view];cnt[key+'|'+t.dataset.id]=t.value;
     const c=S.consumables.find(x=>x.id===t.dataset.id),o=document.getElementById('o-'+t.dataset.id);
@@ -545,10 +557,12 @@ document.getElementById('main').addEventListener('click',async e=>{
   if(act==='login'){login();return}
   if(act==='logout'){mgrPin='';store.set('mgrPin','');S.isMgr=false;S.openIssues=[];render();return}
   if(act==='printorder'){printOrder(S.lastOrder);return}
+  if(act==='inote'){st.inopen[b.dataset.nk]=true;const y=window.scrollY;render();window.scrollTo(0,y);const el=document.querySelector(`textarea[data-nk="${CSS.escape(b.dataset.nk)}"]`);if(el)el.focus();return}
   if(act==='goview'){view=b.dataset.v;store.set('view',view);render();window.scrollTo(0,0);return}
   if(act==='info'){view='consumables';store.set('view',view);st.cq='';st.csrc='';st.copen=b.dataset.pid;render();const el=document.querySelector(`details.item[data-pid="${CSS.escape(b.dataset.pid)}"]`);if(el)el.scrollIntoView({block:'center'});return}
   if(act==='csrc'){st.csrc=b.dataset.v;render();return}
   if(act==='scancat'){openScanner('catlookup');return}
+  if(act==='scangen'){openScanner('gencheck');return}
   if(act==='scanni'){openScanner('catadd');return}
   if(act==='scance'){openScanner('catedit');return}
   if(act==='catedit'){const c=S.catalog.find(x=>x.id===b.dataset.pid);if(!c)return;st.cedit=c.id;st.copen=c.id;st.ce={name:c.name,sku:c.sku,qty:c.qty==null?'':String(c.qty),unit:c.unit,source:c.source,location:c.location,desc:c.desc,howto:c.howto,notes:c.notes};render();const el=$('#ce-name');if(el)el.focus();return}
@@ -603,14 +617,15 @@ document.getElementById('submit').addEventListener('click',async()=>{
     const results={},found={};
     list.forEach(i=>{results[i.id]=d[i.id];const v=cnt[key+'|'+i.id];if(d[i.id]==='missing'&&filled(v))found[i.id]=Number(v)});
     const probs=list.filter(i=>d[i.id]!=='ok').length;
-    action='submitCheck';payload=Object.assign(base,{team,freq:f,results,found});
+    const itemNotes={};list.forEach(i=>{const v=(st.inotes[key+'|'+i.id]||'').trim();if(v)itemNotes[i.id]=v});
+    action='submitCheck';payload=Object.assign(base,{team,freq:f,results,found,itemNotes});
     okMsg=probs?`הבדיקה נשמרה. ${probs} דיווחים נשלחו למנהל`:'הבדיקה נשמרה. הכל תקין';
   }
   busy=true;updateProgress();
   try{
     const s=await api(action,payload);
     if(!staffPin&&!mgrPin){staffPin=pin;store.set('staffPin',pin)}
-    st.pinDraft='';draft[key]={};st.note='';Object.keys(cnt).forEach(k=>{if(k.startsWith(key+'|'))delete cnt[k]});
+    st.pinDraft='';draft[key]={};st.note='';Object.keys(cnt).forEach(k=>{if(k.startsWith(key+'|'))delete cnt[k]});Object.keys(st.inotes).forEach(k=>{if(k.startsWith(key+'|')){delete st.inotes[k];delete st.inopen[k]}});
     busy=false;apply(s);render();window.scrollTo(0,0);
     toast(okMsg);
   }catch(err){
@@ -664,7 +679,7 @@ function scanCount(){
 async function openScanner(mode){
   scanMode=mode;lastCode='';
   $('#scanov').hidden=false;$('#scanmanual').value='';
-  $('#scantitle').textContent={add:'סריקת מכשיר חדש',lookup:'חיפוש מכשיר',repair:'מכשיר לתיקון',catlookup:'חיפוש פריט',catadd:'מק״ט של פריט חדש',catedit:'מק״ט לפריט'}[mode]||'סריקת מכשירים';
+  $('#scantitle').textContent={add:'סריקת מכשיר חדש',lookup:'חיפוש מכשיר',repair:'מכשיר לתיקון',catlookup:'חיפוש פריט',catadd:'מק״ט של פריט חדש',catedit:'מק״ט לפריט',gencheck:'סריקת פריטים'}[mode]||'סריקת מכשירים';
   scanMsg('מכוונים את המצלמה לברקוד שעל המדבקה.');scanCount();
   try{
     await loadLib();
@@ -680,7 +695,7 @@ async function closeScanner(){
   const s=scanner;scanner=null;
   if(s){try{await s.stop()}catch(e){}try{s.clear()}catch(e){}}
   $('#scanov').hidden=true;$('#reader').innerHTML='';
-  if(scanMode==='check'){const y=window.scrollY;render();window.scrollTo(0,y)}
+  if(scanMode==='check'||scanMode==='gencheck'){const y=window.scrollY;render();window.scrollTo(0,y)}
   scanMode=null;
 }
 function onCode(text){
@@ -692,6 +707,12 @@ function onCode(text){
 }
 function handleCode(code,raw){
   const dev=S.devices.find(x=>normId(x.id)===code);
+  if(scanMode==='gencheck'){
+    const key=view+'|'+selFreq[view],it=teamItems(view,selFreq[view]).find(i=>i.barcode&&normId(i.barcode)===code);
+    if(!it){scanMsg('הברקוד '+raw+' לא שייך לבדיקה הזו.','bad');return}
+    draft[key]=draft[key]||{};const was=draft[key][it.id]==='ok';draft[key][it.id]='ok';
+    const all=teamItems(view,selFreq[view]).filter(i=>i.barcode);
+    scanMsg(`✓ ${it.name}${was?' (כבר סומן)':' – תקין'}`,'ok');$('#scancount').textContent=`נסרקו ${all.filter(i=>draft[key][i.id]==='ok').length} מתוך ${all.length} פריטים עם ברקוד`;updateProgress();return}
   if(scanMode==='catlookup'){const c=catFind({barcode:raw});st.cq=c?'':raw;st.csrc='';st.copen=c?c.id:'';closeScanner().then(()=>{render();if(c){const el=document.querySelector(`details.item[data-pid="${CSS.escape(c.id)}"]`);if(el)el.scrollIntoView({block:'center'})}else toast('לא נמצא פריט עם הברקוד '+raw,'err')});return}
   if(scanMode==='catadd'){const c=catFind({barcode:raw});if(c){scanMsg('הפריט כבר בקטלוג: '+c.name,'warn');return}st.ni.sku=raw.replace(/\s+/g,'');closeScanner().then(()=>{render();const el=$('#ni-name');if(el)el.focus()});return}
   if(scanMode==='catedit'){st.ce.sku=raw.replace(/\s+/g,'');closeScanner().then(()=>render());return}
