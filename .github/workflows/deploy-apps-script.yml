@@ -1,0 +1,46 @@
+# Pushes apps-script/Code.gs to the Google Apps Script project and publishes it
+# as a new version of the existing web-app deployment (same URL), on every change.
+name: Deploy Apps Script
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps-script/Code.gs', '.github/workflows/deploy-apps-script.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-apps-script
+  cancel-in-progress: false
+
+env:
+  SCRIPT_ID: 1BYdxnrPSJvZg5O4OLKvI1118sQC8ldcZOAJ155fQXjYfM8RdU3Z0W4Pt
+  DEPLOYMENT_ID: AKfycbzVUj67YvedK152AFKpgiyejK_6TOtR5elEpmxeKhg_5-yaNiXAqFXhsnUdGNv3iU2rdg
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install clasp
+        run: npm install -g @google/clasp@2.4.2
+      - name: Write credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then echo "Secret CLASPRC_JSON is missing"; exit 1; fi
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+      - name: Pull current manifest, push new code
+        run: |
+          mkdir -p /tmp/gas && cd /tmp/gas
+          printf '{"scriptId":"%s","rootDir":"."}' "$SCRIPT_ID" > .clasp.json
+          clasp pull
+          rm -f *.js *.gs
+          cp "$GITHUB_WORKSPACE/apps-script/Code.gs" Code.js
+          clasp push --force
+      - name: Publish as a new version of the existing deployment
+        run: |
+          cd /tmp/gas
+          clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "auto ${GITHUB_SHA::7}"
