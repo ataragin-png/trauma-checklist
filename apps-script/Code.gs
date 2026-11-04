@@ -8,6 +8,7 @@
 
 const SHEET_ID = '1dg1sYid-MfXceeg4bV1Ay1WxlxmND8A3u6DZQisB8aI';
 const SITE_URL = 'https://ataragin-png.github.io/trauma-checklist/';
+const SERVER_VERSION = '2026-11-04-autodeploy';
 
 const TZ = 'Asia/Jerusalem';
 const SH = { items: 'ציוד', checks: 'בדיקות', issues: 'חוסרים ותקלות', settings: 'הגדרות',
@@ -213,7 +214,7 @@ function getState(mgrPin) {
     const k = c.team + '|' + c.freq;
     if (!last[k] || c.at > last[k].at) last[k] = { at: c.at, by: c.by };
   });
-  const res = { unit: s.unit, items: items, last: last, isMgr: isMgr,
+  const res = { serverVersion: SERVER_VERSION, unit: s.unit, items: items, last: last, isMgr: isMgr,
     devices: readDevices_().map(d => ({ id: d.id, type: d.type, location: d.location, vol: d.vol, clean: d.clean, status: d.status })),
     devTypes: readDevTypes_(), consumables: readConsumables_(), catalog: readCatalog_() };
   if (isMgr) {
